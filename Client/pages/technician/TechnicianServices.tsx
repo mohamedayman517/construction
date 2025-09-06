@@ -1,0 +1,343 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Header from "../../components/Header";
+import type { RouteContext } from "../../components/routerTypes";
+import { useTranslation } from "../../hooks/useTranslation";
+import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Badge } from "../../components/ui/badge";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../../components/ui/dialog";
+import { Input } from "../../components/ui/input";
+import { Label } from "../../components/ui/label";
+import Swal from "sweetalert2";
+import { listVendorServices } from "@/services/servicesCatalog";
+
+type Props = Partial<RouteContext>;
+
+export default function TechnicianServices({ setCurrentPage, ...context }: Props) {
+  const { locale } = useTranslation();
+  const isAr = locale === "ar";
+  const currency = isAr ? "ر.س" : "SAR";
+  const technicianId = (context as any)?.user?.id || null;
+  const safeSetCurrentPage = setCurrentPage ?? (() => {});
+
+  const [services, setServices] = useState<any[]>([]);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Proposal dialog state
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [selectedService, setSelectedService] = useState<any | null>(null);
+  const [offerPrice, setOfferPrice] = useState<string>("");
+  const [offerDays, setOfferDays] = useState<string>("");
+  const [offerMessage, setOfferMessage] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  // Load all vendor-posted services from backend
+  useEffect(() => {
+    let cancelled = false;
+    setHydrated(true);
+    (async () => {
+      try {
+        const { ok, data } = await listVendorServices({});
+        if (!cancelled && ok && Array.isArray(data)) setServices(data as any[]);
+        else if (!cancelled) setServices([]);
+      } catch { if (!cancelled) setServices([]); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Build fast lookup for requests already submitted by this technician
+  const submittedServices = useMemo(() => {
+    try {
+      if (typeof window === "undefined") return new Set<string>();
+      const raw = window.localStorage.getItem("technician_requests");
+      const list = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(list)) return new Set<string>();
+      return new Set<string>(
+        list
+          .filter((x: any) => (!!technicianId ? x.technicianId === technicianId : true) && x.targetType === "service")
+          .map((x: any) => String(x.serviceId))
+      );
+    } catch {
+      return new Set<string>();
+    }
+  }, [technicianId, hydrated]);
+
+  const labelForServiceType = (t?: string) => {
+    switch ((t || "").toLowerCase()) {
+      case "plumber":
+        return isAr ? "سباك" : "Plumber";
+      case "electrician":
+        return isAr ? "كهربائي" : "Electrician";
+      case "carpenter":
+        return isAr ? "نجار" : "Carpenter";
+      case "painter":
+        return isAr ? "دهان" : "Painter";
+      case "gypsum":
+        return isAr ? "جبس" : "Gypsum Installer";
+      case "marble":
+        return isAr ? "رخام" : "Marble Installer";
+      default:
+        return t || (isAr ? "خدمة" : "Service");
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      <Header currentPage="technician-services" setCurrentPage={safeSetCurrentPage} {...context} />
+      <div className="container mx-auto px-4 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">{isAr ? "الخدمات" : "Services"}</h1>
+        </div>
+
+        {services.length === 0 ? (
+          <Card>
+            <CardContent className="p-6 text-muted-foreground">
+              {isAr ? "لا توجد خدمات متاحة حالياً." : "No services available right now."}
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {services.map((s: any) => (
+              <Card key={s.id}>
+                <CardHeader>
+                  <CardTitle className="text-base">{labelForServiceType(s.type)}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-sm text-muted-foreground">
+                      {isAr ? "الأجر اليومي" : "Daily wage"}: {currency} {Number(s.dailyWage || 0).toLocaleString(isAr ? "ar-EG" : "en-US")}
+                    </div>
+                    <Badge variant="secondary">{s.days ? (isAr ? `${s.days} يوم` : `${s.days} days`) : (isAr ? "غير محدد" : "N/A")}</Badge>
+                  </div>
+                  {!!s.total && (
+                    <div className="text-sm text-muted-foreground mb-2">
+                      {isAr ? "الإجمالي المتوقع" : "Expected total"}: {currency} {Number(s.total).toLocaleString(isAr ? "ar-EG" : "en-US")}
+                    </div>
+                  )}
+                  {!!s.description && (
+                    <div className="text-xs text-muted-foreground mt-1 line-clamp-2">{s.description}</div>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        try { window.localStorage.setItem('selected_technician_service_id', String(s.id)); } catch {}
+                        safeSetCurrentPage('technician-service-details');
+                      }}
+                    >
+                      {isAr ? 'تفاصيل' : 'Details'}
+                    </Button>
+                    <Button
+                      disabled={submittedServices.has(String(s.id))}
+                      onClick={() => {
+                        if (submittedServices.has(String(s.id))) {
+                          Swal.fire({ icon: "info", title: isAr ? "تم الإرسال مسبقاً" : "Already Submitted", text: isAr ? "لقد قدّمت طلباً لهذه الخدمة مسبقاً." : "You have already submitted a request for this service." });
+                          return;
+                        }
+                        setSelectedService(s);
+                        setOfferPrice("");
+                        setOfferDays("");
+                        setOfferMessage("");
+                        setRequestOpen(true);
+                      }}
+                    >
+                      {submittedServices.has(String(s.id)) ? (isAr ? "تم الإرسال" : "Submitted") : (isAr ? "تقديم طلب" : "Request Service")}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Request Dialog */}
+      <Dialog open={requestOpen} onOpenChange={setRequestOpen}>
+        <DialogContent className="bg-white">
+          <DialogHeader>
+            <DialogTitle>
+              {isAr ? "تقديم طلب للخدمة" : "Submit Request for Service"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-2">
+              <Label>{isAr ? 'السعر المقترح' : 'Proposed Price'}</Label>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="any"
+                value={offerPrice}
+                onChange={(e)=> setOfferPrice(e.target.value)}
+                min={Number((selectedService?.total ?? selectedService?.dailyWage) || 0)}
+                max={Number((((selectedService?.total ?? selectedService?.dailyWage) || 0) * 2))}
+                placeholder={(() => {
+                  const base = Number((selectedService?.total ?? selectedService?.dailyWage) || 0);
+                  const min = base;
+                  const max = base * 2;
+                  const numLocale = isAr ? 'ar-EG' : 'en-US';
+                  return isAr
+                    ? `الحد الأدنى ${Number(min).toLocaleString(numLocale)} والحد الأقصى ${Number(max).toLocaleString(numLocale)}`
+                    : `Min ${Number(min).toLocaleString(numLocale)} • Max ${Number(max).toLocaleString(numLocale)}`;
+                })()}
+              />
+              {(() => {
+                const base = Number((selectedService?.total ?? selectedService?.dailyWage) || 0);
+                const min = base;
+                const max = base * 2;
+                const v = Number(offerPrice);
+                const invalid = offerPrice !== '' && (!isFinite(v) || v < min || v > max);
+                if (!invalid) return null;
+                return (
+                  <div className="text-xs text-red-600">
+                    {isAr
+                      ? `السعر يجب أن يكون بين ${currency} ${min.toLocaleString('ar-EG')} و ${currency} ${max.toLocaleString('ar-EG')}`
+                      : `Price must be between ${currency} ${min.toLocaleString('en-US')} and ${currency} ${max.toLocaleString('en-US')}`}
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="grid gap-2">
+              <Label>{isAr ? 'المدة (أيام)' : 'Duration (days)'}</Label>
+              <Input
+                type="number"
+                inputMode="numeric"
+                value={offerDays}
+                onChange={(e)=> setOfferDays(e.target.value)}
+                min={1}
+                max={Number(selectedService?.days || undefined)}
+                placeholder={(() => {
+                  const maxDays = Number(selectedService?.days || 0);
+                  return maxDays > 0
+                    ? (isAr ? `بين 1 و ${maxDays}` : `Between 1 and ${maxDays}`)
+                    : (isAr ? 'بحد أدنى 1' : 'Minimum 1');
+                })()}
+              />
+              {(() => {
+                const maxDays = Number(selectedService?.days || Infinity);
+                const v = Number(offerDays);
+                const invalid = offerDays !== '' && (!Number.isFinite(v) || v < 1 || (Number.isFinite(maxDays) && v > maxDays));
+                if (!invalid) return null;
+                return (
+                  <div className="text-xs text-red-600">
+                    {Number.isFinite(maxDays)
+                      ? (isAr ? `عدد الأيام يجب أن يكون بين 1 و ${maxDays}` : `Days must be between 1 and ${maxDays}`)
+                      : (isAr ? 'عدد الأيام يجب ألا يقل عن 1' : 'Days must be at least 1')}
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="grid gap-2">
+              <Label>{isAr ? 'رسالة' : 'Message'}</Label>
+              <Input value={offerMessage} onChange={(e)=> setOfferMessage(e.target.value)} placeholder={isAr ? 'أدخل رسالة قصيرة' : 'Enter a short message'} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              className="w-full"
+              disabled={(() => {
+                if (saving || !selectedService) return true;
+                const base = Number((selectedService?.total ?? selectedService?.dailyWage) || 0);
+                const minP = base, maxP = base * 2;
+                const vP = Number(offerPrice);
+                const maxD = Number(selectedService?.days || Infinity);
+                const vD = Number(offerDays);
+                const validP = offerPrice !== '' && isFinite(vP) && vP >= minP && vP <= maxP;
+                const validD = offerDays !== '' && Number.isFinite(vD) && vD >= 1 && (!Number.isFinite(maxD) || vD <= maxD);
+                return !(validP && validD);
+              })()}
+              onClick={() => {
+                if (!selectedService) return;
+                if (!technicianId) {
+                  Swal.fire({ icon: 'warning', title: isAr ? 'تسجيل الدخول مطلوب' : 'Login required', text: isAr ? 'الرجاء تسجيل الدخول كفني لتقديم الطلب.' : 'Please log in as a technician to submit requests.' });
+                  return;
+                }
+                // Validate ranges strictly (no clamping)
+                const basePrice = Number((selectedService?.total ?? selectedService?.dailyWage) || 0);
+                const minPrice = basePrice;
+                const maxPrice = basePrice * 2;
+                const priceNum = Number(offerPrice);
+                const daysNum = Number(offerDays);
+                const numLocale = isAr ? 'ar-EG' : 'en-US';
+                if (!isFinite(priceNum) || priceNum < minPrice || priceNum > maxPrice) {
+                  Swal.fire({
+                    icon: 'error',
+                    title: isAr ? 'قيمة السعر غير صحيحة' : 'Invalid price',
+                    text: isAr
+                      ? `يجب أن يكون السعر بين ${currency} ${minPrice.toLocaleString(numLocale)} و ${currency} ${maxPrice.toLocaleString(numLocale)}`
+                      : `Price must be between ${currency} ${minPrice.toLocaleString(numLocale)} and ${currency} ${maxPrice.toLocaleString(numLocale)}`,
+                  });
+                  return;
+                }
+                const maxDays = Number(selectedService?.days || Infinity);
+                if (!Number.isFinite(daysNum) || daysNum < 1 || (Number.isFinite(maxDays) && daysNum > maxDays)) {
+                  Swal.fire({
+                    icon: 'error',
+                    title: isAr ? 'قيمة الأيام غير صحيحة' : 'Invalid days',
+                    text: Number.isFinite(maxDays)
+                      ? (isAr ? `عدد الأيام يجب أن يكون بين 1 و ${maxDays}` : `Days must be between 1 and ${maxDays}`)
+                      : (isAr ? 'عدد الأيام يجب ألا يقل عن 1' : 'Days must be at least 1'),
+                  });
+                  return;
+                }
+                try {
+                  setSaving(true);
+                  const request = {
+                    id: `treq_${Date.now()}`,
+                    targetType: 'service' as const,
+                    serviceId: selectedService.id,
+                    price: priceNum,
+                    days: daysNum,
+                    message: offerMessage || '',
+                    technicianId,
+                    status: 'pending',
+                    createdAt: new Date().toISOString(),
+                  };
+                  const raw = window.localStorage.getItem('technician_requests');
+                  const list = raw ? JSON.parse(raw) : [];
+                  const exists = Array.isArray(list) && list.some((x:any)=> x.targetType==='service' && String(x.serviceId)===String(selectedService.id) && (!!technicianId ? x.technicianId===technicianId : true));
+                  if (!exists) list.push(request);
+                  window.localStorage.setItem('technician_requests', JSON.stringify(list));
+
+                  // Notify service owner (vendor)
+                  try {
+                    const recipientId = selectedService.userId || selectedService.user?.id || null;
+                    const techName = (context as any)?.user?.name || (context as any)?.user?.username || (context as any)?.user?.email || (isAr ? 'فني' : 'Technician');
+                    const title = isAr ? 'طلب جديد على خدمتك' : 'New request on your service';
+                    const numLocale = isAr ? 'ar-EG' : 'en-US';
+                    const desc = isAr
+                      ? `${techName} قدّم طلبًا بقيمة ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale)} لمدة ${Number(offerDays || 0)} يوم`
+                      : `${techName} submitted a request: ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale)} for ${Number(offerDays || 0)} days`;
+                    const nraw = window.localStorage.getItem('app_notifications');
+                    const nlist = nraw ? JSON.parse(nraw) : [];
+                    const notif = {
+                      id: `ntf_${Date.now()}`,
+                      type: 'service_request',
+                      recipientId,
+                      recipientRole: 'vendor',
+                      title,
+                      description: desc,
+                      createdAt: new Date().toISOString(),
+                      read: false,
+                    };
+                    const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
+                    window.localStorage.setItem('app_notifications', JSON.stringify(combined));
+                  } catch {}
+
+                  setRequestOpen(false);
+                  Swal.fire({ icon: 'success', title: isAr ? 'تم إرسال الطلب' : 'Request submitted', timer: 1800, showConfirmButton: false });
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              {saving ? (isAr ? 'جارٍ الحفظ...' : 'Saving...') : (isAr ? 'إرسال الطلب' : 'Send Request')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

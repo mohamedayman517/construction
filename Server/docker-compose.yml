@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  # SQL Server Database
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: construction-marketplace-db
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=YourStrong!Passw0rd
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    networks:
+      - construction-network
+    restart: unless-stopped
+
+  # Construction Marketplace API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: construction-marketplace-api
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=ConstructionMarketplaceDb;User Id=sa;Password=YourStrong!Passw0rd;TrustServerCertificate=true;
+      - Jwt__Key=ThisIsASecretKeyForJWTTokenGeneration123456789_DOCKER
+      - Jwt__Issuer=ConstructionMarketplace
+      - Jwt__Audience=ConstructionMarketplaceUsers
+      - Jwt__ExpireDays=7
+    ports:
+      - "5000:80"
+    depends_on:
+      - sqlserver
+    networks:
+      - construction-network
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./wwwroot/uploads:/app/wwwroot/uploads
+
+  # Redis Cache (Optional)
+  redis:
+    image: redis:7-alpine
+    container_name: construction-marketplace-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - construction-network
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+
+volumes:
+  sqlserver_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  construction-network:
+    driver: bridge
+
