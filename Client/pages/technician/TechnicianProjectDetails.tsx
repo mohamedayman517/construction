@@ -10,6 +10,8 @@ import { Input } from "../../components/ui/input";
 import { useTranslation } from "../../hooks/useTranslation";
 import type { RouteContext } from "../../components/routerTypes";
 import Swal from "sweetalert2";
+import { getProjectById } from "@/services/projects";
+import { createOffer, getTechnicianOffers } from "@/services/offers";
 
 interface Props extends Partial<RouteContext> {}
 
@@ -20,6 +22,7 @@ export default function TechnicianProjectDetails({ setCurrentPage, ...context }:
   const technicianId = (context as any)?.user?.id || null;
 
   const [project, setProject] = useState<any | null>(null);
+  const [myOffers, setMyOffers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
@@ -28,32 +31,32 @@ export default function TechnicianProjectDetails({ setCurrentPage, ...context }:
   const [offerMessage, setOfferMessage] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
-  // Load selected project by id from localStorage (set by TechnicianProjects)
+  // Load selected project by id from backend (id is persisted in localStorage only for navigation)
   useEffect(() => {
-    try {
-      if (typeof window === 'undefined') return;
-      const id = window.localStorage.getItem('selected_technician_project_id');
-      if (!id) { setLoading(false); return; }
-      const raw = window.localStorage.getItem('user_projects');
-      const list = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(list)) {
-        const found = list.find((p:any)=> String(p.id) === String(id));
-        setProject(found || null);
-      }
-    } finally { setLoading(false); }
+    (async () => {
+      try {
+        if (typeof window === 'undefined') { setLoading(false); return; }
+        const id = window.localStorage.getItem('selected_technician_project_id');
+        if (!id) { setLoading(false); return; }
+        const { ok, data } = await getProjectById(Number(id));
+        if (ok && data) setProject(data as any);
+        else setProject(null);
+      } finally { setLoading(false); }
+    })();
   }, []);
 
-  // Check if current technician already submitted a request for this project
+  // Load my offers and check if submitted
   useEffect(() => {
-    try {
-      if (!project) { setHasSubmitted(false); return; }
-      const raw = window.localStorage.getItem('technician_requests');
-      const list = raw ? JSON.parse(raw) : [];
-      const exists = Array.isArray(list)
-        ? list.some((x:any) => x.targetType==='project' && String(x.targetId)===String(project.id) && (!!technicianId ? x.technicianId===technicianId : true))
-        : false;
-      setHasSubmitted(!!exists);
-    } catch { setHasSubmitted(false); }
+    (async () => {
+      try {
+        if (!project || !technicianId) { setHasSubmitted(false); setMyOffers([]); return; }
+        const { ok, data } = await getTechnicianOffers(String(technicianId));
+        const offers = ok && Array.isArray(data) ? (data as any[]) : [];
+        setMyOffers(offers);
+        const exists = offers.some((o:any)=> String(o.targetType).toLowerCase()==='project' && String(o.projectId)===String(project.id));
+        setHasSubmitted(exists);
+      } catch { setHasSubmitted(false); setMyOffers([]); }
+    })();
   }, [project, technicianId]);
 
   const labelForProductType = (id?: string) => {
@@ -177,51 +180,19 @@ export default function TechnicianProjectDetails({ setCurrentPage, ...context }:
                     }
                     try {
                       setSaving(true);
-                      const request = {
-                        id: `treq_${Date.now()}`,
-                        targetType: 'project' as const,
-                        targetId: project.id,
-                        targetSnapshot: project,
-                        price: Number(offerPrice || 0),
-                        days: Number(offerDays || 0),
-                        message: offerMessage || '',
-                        technicianId,
-                        status: 'pending',
-                        createdAt: new Date().toISOString(),
-                      };
-                      const raw = window.localStorage.getItem('technician_requests');
-                      const list = raw ? JSON.parse(raw) : [];
-                      const exists = Array.isArray(list) && list.some((x:any)=> x.targetType==='project' && String(x.targetId)===String(project.id) && (!!technicianId ? x.technicianId===technicianId : true));
-                      if (!exists) list.push(request);
-                      window.localStorage.setItem('technician_requests', JSON.stringify(list));
-
-                      // Notify project owner
-                      try {
-                        const recipientId = project.userId || project.user?.id || null;
-                        const techName = (context as any)?.user?.name || (context as any)?.user?.username || (context as any)?.user?.email || (isAr ? 'فني' : 'Technician');
-                        const title = isAr ? 'تم تقديم عرض على مشروعك' : 'New proposal on your project';
-                        const numLocale = isAr ? 'ar-EG' : 'en-US';
-                        const desc = isAr
-                          ? `${techName} قدّم عرضًا بقيمة ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale)} لمدة ${Number(offerDays || 0)} يوم`
-                          : `${techName} submitted an offer of ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale)} for ${Number(offerDays || 0)} days`;
-                        const nraw = window.localStorage.getItem('app_notifications');
-                        const nlist = nraw ? JSON.parse(nraw) : [];
-                        const notif = {
-                          id: `ntf_${Date.now()}`,
-                          type: 'proposal',
-                          recipientId,
-                          recipientRole: 'user',
-                          title,
-                          desc,
-                          createdAt: new Date().toISOString(),
-                          meta: { targetType: 'project', targetId: project.id }
-                        };
-                        const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                        window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                      } catch {}
-
-                      setHasSubmitted(true);
-                      Swal.fire({ icon: 'success', title: isAr ? 'تم إرسال العرض' : 'Proposal submitted', timer: 1800, showConfirmButton: false });
+                      (async () => {
+                        const res = await createOffer({ targetType: 'project', projectId: Number(project.id), price: Number(offerPrice || 0), days: Number(offerDays || 0), message: offerMessage || '' });
+                        if (res.ok) {
+                          setHasSubmitted(true);
+                          try {
+                            if (technicianId) {
+                              const { ok, data } = await getTechnicianOffers(String(technicianId));
+                              if (ok && Array.isArray(data)) setMyOffers(data as any[]);
+                            }
+                          } catch {}
+                          Swal.fire({ icon: 'success', title: isAr ? 'تم إرسال العرض' : 'Proposal submitted', timer: 1800, showConfirmButton: false });
+                        }
+                      })();
                     } finally {
                       setSaving(false);
                     }

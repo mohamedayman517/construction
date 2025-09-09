@@ -14,6 +14,7 @@ namespace ConstructionMarketplace.Services
         Task<bool> ResetPasswordAsync(ResetPasswordDto resetPasswordDto);
         Task<UserDto?> GetUserProfileAsync(string userId);
         Task<bool> UpdateUserProfileAsync(string userId, UpdateProfileDto updateProfileDto);
+        Task<bool> UpdateIbanAsync(string userId, string iban);
         Task<TokenValidationDto> ValidateTokenAsync(string token);
         Task<bool> ConfirmEmailAsync(string userId, string token);
         Task<bool> ResendEmailConfirmationAsync(string email);

@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
+import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Eye } from "lucide-react";
 import { useTranslation } from "../../hooks/useTranslation";
 import type { RouteContext } from "../../components/routerTypes";
-import { getUsers } from "../../lib/authMock";
 import { listVendorServices } from "@/services/servicesCatalog";
 
 type Props = Partial<RouteContext>;
@@ -19,52 +19,20 @@ export default function VendorServices({ setCurrentPage, ...context }: Props) {
   const safeSetCurrentPage = setCurrentPage ?? (() => {});
 
   const [userServices, setUserServices] = useState<any[]>([]);
-  const [techRequests, setTechRequests] = useState<any[]>([]);
-  const vendorId = (context as any)?.user?.id;
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    const load = async () => {
-      // try backend first
+    (async () => {
       try {
         const { ok, data } = await listVendorServices({ vendorId: 'me' });
-        if (ok && Array.isArray(data) && !cancelled) {
-          setUserServices(data as any[]);
-          return;
-        }
+        if (ok && Array.isArray(data) && !cancelled) setUserServices(data as any[]);
       } catch {}
-      // fallback to local storage
-      try {
-        if (typeof window === "undefined") return;
-        const raw = window.localStorage.getItem("user_services");
-        const list = raw ? JSON.parse(raw) : [];
-        if (Array.isArray(list)) {
-          const filtered = vendorId ? list.filter((s:any)=> String(s.userId) === String(vendorId)) : list;
-          if (!cancelled) setUserServices(filtered);
-        }
-      } catch {}
-    };
-    load();
+      finally { if (!cancelled) setLoading(false); }
+    })();
     return () => { cancelled = true; };
   }, []);
 
-  // Load technician requests (applications) to vendor services
-  useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      const raw = window.localStorage.getItem("technician_requests");
-      const list = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(list)) setTechRequests(list.filter((x:any)=> x?.targetType === 'service'));
-    } catch {}
-  }, []);
-
-  const techNameById = (id: string | number) => {
-    try {
-      const users = getUsers();
-      const u = users.find(u => String(u.id) === String(id));
-      return u?.name || `#${id}`;
-    } catch { return `#${id}`; }
-  };
 
   const labelForServiceType = (id: string) => {
     const map: any = {
@@ -108,7 +76,12 @@ export default function VendorServices({ setCurrentPage, ...context }: Props) {
             {userServices.map((s:any) => (
               <Card key={s.id}>
                 <CardHeader>
-                  <CardTitle className="text-base">{labelForServiceType(s.type)}</CardTitle>
+                  <div className="flex items-center justify-between gap-2">
+                    <CardTitle className="text-base">{labelForServiceType(s.type)}</CardTitle>
+                    <Badge className={!s.isApproved ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}>
+                      {locale === 'ar' ? (!s.isApproved ? 'قيد المراجعة' : 'معتمد') : (!s.isApproved ? 'Pending' : 'Approved')}
+                    </Badge>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-3 text-sm">
                   <div className="text-muted-foreground">
@@ -135,39 +108,12 @@ export default function VendorServices({ setCurrentPage, ...context }: Props) {
                       {locale === 'ar' ? 'تفاصيل' : 'Details'}
                     </Button>
                   </div>
-                  {/* Technician applicants */}
-                  {(() => {
-                    const applicants = techRequests.filter((x:any)=> String(x.serviceId) === String(s.id));
-                    if (applicants.length === 0) {
-                      return (
-                        <div className="mt-3 text-xs text-muted-foreground">
-                          {locale === 'ar' ? 'لا يوجد متقدمون بعد.' : 'No applicants yet.'}
-                        </div>
-                      );
-                    }
-                    return (
-                      <div className="mt-3">
-                        <div className="text-sm font-medium mb-2">
-                          {locale === 'ar' ? 'المتقدمون' : 'Applicants'} ({applicants.length})
-                        </div>
-                        <div className="space-y-2 max-h-40 overflow-auto pr-1">
-                          {applicants.map((a:any) => (
-                            <div key={a.id} className="rounded border p-2 bg-muted/20">
-                              <div className="flex items-center justify-between">
-                                <div className="font-medium text-xs">{techNameById(a.technicianId)}</div>
-                                <div className="text-xs text-muted-foreground">
-                                  {currency} {Number(a.price || 0).toLocaleString(locale === 'ar' ? 'ar-EG' : 'en-US')} • {locale==='ar' ? `${Number(a.days||0)} يوم` : `${Number(a.days||0)} days`}
-                                </div>
-                              </div>
-                              {!!a.message && (
-                                <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{a.message}</div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {!s.isApproved && (
+                    <div className="text-xs text-muted-foreground">
+                      {locale === 'ar' ? 'هذه الخدمة بانتظار موافقة الأدمن قبل ظهورها للجمهور.' : 'This service is pending admin approval before it appears publicly.'}
+                    </div>
+                  )}
+                  {/* Applicants section removed - dynamic only via backend if needed */}
                 </CardContent>
               </Card>
             ))}

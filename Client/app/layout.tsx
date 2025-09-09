@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 import { headers } from 'next/headers'
 import './globals.css'
+import { Toaster } from '../components/ui/sonner'
 
 export const metadata: Metadata = {
   title: 'Arabic Auto - منصة السيارات العربية',
@@ -21,6 +22,7 @@ export default function RootLayout({
     <html lang={locale} dir={isRTL ? 'rtl' : 'ltr'}>
       <body className="min-h-screen bg-background font-sans antialiased">
         {children}
+        <Toaster position="top-center" richColors />
       </body>
     </html>
   )

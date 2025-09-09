@@ -22,6 +22,8 @@ namespace ConstructionMarketplace.DTOs
         public bool AllowCustomDimensions { get; set; }
         public bool IsAvailableForRent { get; set; }
         public decimal? RentPricePerDay { get; set; }
+        public bool IsApproved { get; set; }
+        public DateTime? ApprovedAt { get; set; }
         public decimal? AverageRating { get; set; }
         public int ReviewCount { get; set; }
         public List<ProductImageDto> Images { get; set; } = new List<ProductImageDto>();
@@ -208,6 +210,8 @@ namespace ConstructionMarketplace.DTOs
         public DateTime? EndDate { get; set; }
         public int WorkersNeeded { get; set; }
         public ServiceRequestStatus Status { get; set; }
+        public bool IsApproved { get; set; }
+        public DateTime? ApprovedAt { get; set; }
         public DateTime ApplicationDeadline { get; set; }
         public int ViewCount { get; set; }
         public int ApplicationCount { get; set; }

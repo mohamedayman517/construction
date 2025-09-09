@@ -35,7 +35,6 @@ export default function Register({ setCurrentPage, setUser, returnTo, setReturnT
   const [vMiddleName, setVMiddleName] = useState('');
   const [vLastName, setVLastName] = useState('');
   const [vPhone2, setVPhone2] = useState('');
-  const [vIban, setVIban] = useState('');
   const [vBuilding, setVBuilding] = useState('');
   const [vStreet, setVStreet] = useState('');
   const [vCity, setVCity] = useState('');
@@ -82,10 +81,6 @@ export default function Register({ setCurrentPage, setUser, returnTo, setReturnT
       // Basic vendor validations
       if (!phone.trim()) { setError(isAr ? 'رقم الهاتف الأساسي مطلوب' : 'Primary phone is required'); return; }
       if (!vFirstName.trim() || !vLastName.trim()) { setError(isAr ? 'الاسم الأول واسم العائلة مطلوبان' : 'First and last name are required'); return; }
-      // IBAN SA validation: SA + 22 chars = 24 total
-      const iban = vIban.trim();
-      const ibanOk = /^SA\d{2}[A-Z0-9]{18}$/i.test(iban);
-      if (!ibanOk) { setError(isAr ? 'رقم الآيبان غير صحيح. يجب أن يبدأ بـ SA ويتبع الصيغة القياسية.' : 'Invalid IBAN. Must start with SA and follow standard format.'); return; }
       if (!vBuilding.trim() || !vStreet.trim() || !vCity.trim() || !vPostal.trim()) { setError(isAr ? 'العنوان الكامل مطلوب (رقم المبنى، الشارع، المدينة، الرمز البريدي)' : 'Full address is required (building, street, city, postal code)'); return; }
     }
 
@@ -107,7 +102,6 @@ export default function Register({ setCurrentPage, setUser, returnTo, setReturnT
       base.firstName = vFirstName.trim();
       base.middleName = vMiddleName.trim() || undefined;
       base.lastName = vLastName.trim();
-      base.iban = vIban.trim();
       base.buildingNumber = vBuilding.trim();
       base.streetName = vStreet.trim();
       base.cityName = vCity.trim();
@@ -345,10 +339,6 @@ export default function Register({ setCurrentPage, setUser, returnTo, setReturnT
                           <Label className="font-medium" htmlFor="phone2">{isAr ? 'رقم هاتف إضافي (اختياري)' : 'Secondary Phone (optional)'}</Label>
                           <Input id="phone2" value={vPhone2} onChange={(e)=> setVPhone2(e.target.value)} className="h-12 rounded-xl text-base" />
                         </div>
-                      </div>
-                      <div className={cn('space-y-1', isAr ? 'text-right' : 'text-left')}>
-                        <Label className="font-medium" htmlFor="iban">{isAr ? 'رقم الآيبان (IBAN) يبدأ بـ SA' : 'IBAN (starts with SA)'}</Label>
-                        <Input id="iban" value={vIban} onChange={(e)=> setVIban(e.target.value.toUpperCase())} placeholder="SA" className="h-12 rounded-xl text-base" />
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className={cn('space-y-1', isAr ? 'text-right' : 'text-left')}>

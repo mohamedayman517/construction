@@ -10,6 +10,7 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import { Eye, Send } from "lucide-react";
 import { useTranslation } from "../../hooks/useTranslation";
+import { getOpenProjects, getMyBids, createBid } from "@/services/projects";
 import type { RouteContext } from "../../components/routerTypes";
 
 interface Props extends Partial<RouteContext> {}
@@ -19,6 +20,7 @@ export default function VendorProjects({ setCurrentPage, ...context }: Props) {
   const currency = locale === "ar" ? "ر.س" : "SAR";
 
   const [userProjects, setUserProjects] = useState<any[]>([]);
+  const [myBids, setMyBids] = useState<any[]>([]);
   const [proposalOpen, setProposalOpen] = useState(false);
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
   const [offerPrice, setOfferPrice] = useState<string>("");
@@ -29,26 +31,29 @@ export default function VendorProjects({ setCurrentPage, ...context }: Props) {
 
   // Build a fast lookup for already-submitted project IDs by this vendor
   const submittedProjects = useMemo(() => {
-    try {
-      const raw = window.localStorage.getItem('vendor_proposals');
-      const list = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(list)) return new Set<string>();
-      return new Set<string>(
-        list
-          .filter((x:any)=> x.targetType==='project' && (!vendorId || x.vendorId === vendorId))
-          .map((x:any)=> String(x.targetId))
-      );
-    } catch { return new Set<string>(); }
-  }, [vendorId, userProjects.length]);
+    if (!Array.isArray(myBids)) return new Set<string>();
+    return new Set<string>(myBids.map((b:any)=> String(b.projectId)));
+  }, [myBids]);
 
   useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      const raw = window.localStorage.getItem("user_projects");
-      const list = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(list)) setUserProjects(list);
-    } catch {}
+    (async () => {
+      try {
+        const { ok, data } = await getOpenProjects();
+        if (ok && Array.isArray(data)) setUserProjects(data as any[]);
+        else setUserProjects([]);
+      } catch { setUserProjects([]); }
+    })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { ok, data } = await getMyBids();
+        if (ok && Array.isArray(data)) setMyBids(data as any[]);
+        else setMyBids([]);
+      } catch { setMyBids([]); }
+    })();
+  }, [vendorId]);
 
   const labelForProductType = (id: string) => {
     const map: any = {
@@ -164,8 +169,8 @@ export default function VendorProjects({ setCurrentPage, ...context }: Props) {
                 id="price"
                 type="number"
                 inputMode="decimal"
-                min={Number(((selectedProject?.total ?? 0)))}
-                max={Number(((selectedProject?.total ?? 0) * 2))}
+                min={Number(selectedProject?.total || 0)}
+                max={Number((selectedProject?.total || 0) * 2)}
                 placeholder={(() => {
                   const base = Number(selectedProject?.total || 0);
                   const min = base;
@@ -239,13 +244,13 @@ export default function VendorProjects({ setCurrentPage, ...context }: Props) {
           <DialogFooter>
             <Button
               disabled={(() => {
-                if (saving || !selectedProject || submittedProjects.has(String(selectedProject.id))) return true;
-                const base = Number(selectedProject?.total || 0);
-                const minP = base, maxP = base * 2;
+                if (saving || !selectedProject || !offerPrice || !offerDays || submittedProjects.has(String(selectedProject?.id || ''))) return true;
                 const vP = Number(offerPrice);
-                const maxD = Number(selectedProject?.days || Infinity);
                 const vD = Number(offerDays);
+                const minP = Number(selectedProject?.total || 0);
+                const maxP = minP * 2;
                 const validP = offerPrice !== '' && isFinite(vP) && vP >= minP && vP <= maxP;
+                const maxD = Number(selectedProject?.days || Infinity);
                 const validD = offerDays !== '' && Number.isFinite(vD) && vD >= 1 && (!Number.isFinite(maxD) || vD <= maxD);
                 return !(validP && validD);
               })()}
@@ -255,83 +260,17 @@ export default function VendorProjects({ setCurrentPage, ...context }: Props) {
                   Swal.fire({ icon: 'info', title: locale==='ar' ? 'تم الإرسال مسبقاً' : 'Already Submitted', text: locale==='ar' ? 'لا يمكنك إرسال عرض آخر لهذا المشروع.' : 'You have already submitted a proposal for this project.' });
                   return;
                 }
-                // Validate ranges strictly
-                const basePrice = Number(selectedProject?.total || 0);
-                const minPrice = basePrice;
-                const maxPrice = basePrice * 2;
-                const priceNum = Number(offerPrice);
-                const daysNum = Number(offerDays);
-                const numLocale = locale === 'ar' ? 'ar-EG' : 'en-US';
-                if (!isFinite(priceNum) || priceNum < minPrice || priceNum > maxPrice) {
-                  Swal.fire({
-                    icon: 'error',
-                    title: locale === 'ar' ? 'قيمة السعر غير صحيحة' : 'Invalid price',
-                    text: locale === 'ar'
-                      ? `يجب أن يكون السعر بين ${currency} ${minPrice.toLocaleString(numLocale)} و ${currency} ${maxPrice.toLocaleString(numLocale)}`
-                      : `Price must be between ${currency} ${minPrice.toLocaleString(numLocale)} and ${currency} ${maxPrice.toLocaleString(numLocale)}`,
-                  });
-                  return;
-                }
-                const maxDays = Number(selectedProject?.days || Infinity);
-                if (!Number.isFinite(daysNum) || daysNum < 1 || (Number.isFinite(maxDays) && daysNum > maxDays)) {
-                  Swal.fire({
-                    icon: 'error',
-                    title: locale === 'ar' ? 'قيمة الأيام غير صحيحة' : 'Invalid days',
-                    text: Number.isFinite(maxDays)
-                      ? (locale === 'ar' ? `عدد الأيام يجب أن يكون بين 1 و ${maxDays}` : `Days must be between 1 and ${maxDays}`)
-                      : (locale === 'ar' ? 'عدد الأيام يجب ألا يقل عن 1' : 'Days must be at least 1'),
-                  });
-                  return;
-                }
-                try {
-                  setSaving(true);
-                  const proposal = {
-                    id: `prop_${Date.now()}`,
-                    targetType: 'project',
-                    targetId: selectedProject.id,
-                    targetSnapshot: selectedProject,
-                    price: priceNum,
-                    days: daysNum,
-                    message: offerMessage,
-                    vendorId: (context as any)?.user?.id || null,
-                    status: 'pending',
-                    createdAt: new Date().toISOString(),
-                  };
-                  const raw = window.localStorage.getItem('vendor_proposals');
-                  const list = raw ? JSON.parse(raw) : [];
-                  // Prevent double insert as a final guard
-                  const exists = Array.isArray(list) && list.some((x:any)=> x.targetType==='project' && String(x.targetId)===String(selectedProject.id) && (!vendorId || x.vendorId===vendorId));
-                  if (!exists) list.push(proposal);
-                  window.localStorage.setItem('vendor_proposals', JSON.stringify(list));
-
-                  // Create user notification for the project owner
+                (async () => {
                   try {
-                    const recipientId = selectedProject.userId || selectedProject.user?.id || null;
-                    const vendorName = (context as any)?.user?.name || (context as any)?.user?.username || (context as any)?.user?.email || (locale==='ar' ? 'بائع' : 'Vendor');
-                    const title = locale==='ar' ? 'تم تقديم عرض على مشروعك' : 'New proposal on your project';
-                    const numLocale = locale==='ar' ? 'ar-EG' : 'en-US';
-                    const desc = locale==='ar'
-                      ? `${vendorName} قدّم عرضًا بقيمة ${currency} ${Number(offerPrice).toLocaleString(numLocale)} لمدة ${Number(offerDays)} يوم`
-                      : `${vendorName} submitted an offer of ${currency} ${Number(offerPrice).toLocaleString(numLocale)} for ${Number(offerDays)} days`;
-                    const nraw = window.localStorage.getItem('app_notifications');
-                    const nlist = nraw ? JSON.parse(nraw) : [];
-                    const notif = {
-                      id: `ntf_${Date.now()}`,
-                      type: 'proposal',
-                      recipientId,
-                      recipientRole: 'user',
-                      title,
-                      desc,
-                      createdAt: new Date().toISOString(),
-                      meta: { targetType: 'project', targetId: selectedProject.id }
-                    };
-                    const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                    window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                  } catch {}
-                  setProposalOpen(false);
-                } finally {
-                  setSaving(false);
-                }
+                    setSaving(true);
+                    const res = await createBid(Number(selectedProject.id), { price: Number(offerPrice), days: Number(offerDays), message: offerMessage });
+                    if (res.ok) {
+                      try { const { ok, data } = await getMyBids(); if (ok && Array.isArray(data)) setMyBids(data as any[]); } catch {}
+                      setProposalOpen(false);
+                      Swal.fire({ icon: 'success', title: locale==='ar' ? 'تم إرسال العرض' : 'Proposal submitted', timer: 1600, showConfirmButton: false });
+                    }
+                  } finally { setSaving(false); }
+                })();
               }}
             >
               {saving ? (locale === 'ar' ? 'جارٍ الحفظ...' : 'Saving...') : (locale === 'ar' ? 'إرسال العرض' : 'Send Proposal')}

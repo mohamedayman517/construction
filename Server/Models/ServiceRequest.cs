@@ -74,6 +74,11 @@ namespace ConstructionMarketplace.Models
 
         public ServiceRequestStatus Status { get; set; } = ServiceRequestStatus.Open;
 
+        // Admin approval
+        public bool IsApproved { get; set; } = false;
+
+        public DateTime? ApprovedAt { get; set; }
+
         public DateTime ApplicationDeadline { get; set; }
 
         public int ViewCount { get; set; } = 0;

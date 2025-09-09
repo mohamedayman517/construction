@@ -18,6 +18,11 @@ const nextConfig = {
     ],
   },
   reactStrictMode: true,
+  async rewrites() {
+    return [
+      { source: '/:locale/icon.svg', destination: '/icon.svg' },
+    ];
+  },
 }
 
 module.exports = nextConfig

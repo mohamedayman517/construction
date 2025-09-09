@@ -10,6 +10,7 @@ export type ServiceDto = {
   createdAt?: string;
   updatedAt?: string;
   vendorId?: string | number;
+  isApproved?: boolean;
 };
 
 export async function listVendorServices(params?: { vendorId?: 'me' | string | number }) {
@@ -33,4 +34,22 @@ export async function updateService(id: string | number, payload: Partial<Servic
 
 export async function deleteService(id: string | number) {
   return api.del<unknown>(`/api/Services/${id}`, { auth: true });
+}
+
+// Public services (approved only)
+export async function listPublicServices() {
+  return api.get<ServiceDto[]>(`/api/Services/public`);
+}
+
+// Admin endpoints for service approvals
+export async function adminListPendingServices() {
+  return api.get<{ success: boolean; items: any[] }>(`/api/Admin/services/pending`, { auth: true });
+}
+
+export async function adminApproveService(id: number | string) {
+  return api.post(`/api/Admin/services/${id}/approve`, null, { auth: true });
+}
+
+export async function adminRejectService(id: number | string, reason?: string) {
+  return api.post(`/api/Admin/services/${id}/reject`, reason ?? '', { auth: true });
 }

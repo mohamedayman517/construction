@@ -16,7 +16,8 @@ import { RouteContext } from '../../components/Router';
 import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 import { useTranslation } from '../../hooks/useTranslation';
-import { error as errorDialog } from '../../utils/alerts';
+import { error as errorDialog, success as successDialog } from '../../utils/alerts';
+import { getProfile, updateProfile } from '@/services/auth';
 
 interface VendorSettingsProps extends RouteContext {}
 
@@ -109,9 +110,31 @@ export default function VendorSettings(props: VendorSettingsProps) {
     console.log('Shipping settings saved:', shippingSettings);
   };
 
-  const handleSavePayment = () => {
-    // Save payment settings logic
-    console.log('Payment settings saved:', paymentSettings);
+  const handleSavePayment = async () => {
+    // If user is merchant/vendor, push IBAN to profile
+    const role = (props.user?.role || '').toString().toLowerCase();
+    const isVendor = role === 'vendor' || role === 'merchant';
+    if (isVendor) {
+      try {
+        const iban = (paymentSettings.iban || '').toString().trim();
+        // Basic SA IBAN format check (optional)
+        if (iban && !/^SA\d{2}[A-Z0-9]{18}$/i.test(iban)) {
+          await errorDialog(locale === 'ar' ? 'رقم الآيبان غير صحيح. يجب أن يبدأ بـ SA.' : 'Invalid IBAN. It must start with SA.', locale === 'ar');
+          return;
+        }
+        const res = await updateProfile({ iban: iban } as any);
+        if (res.ok) {
+          await successDialog(locale === 'ar' ? 'تم حفظ بيانات الدفع' : 'Payment settings saved', locale === 'ar');
+        } else {
+          await errorDialog(locale === 'ar' ? 'فشل حفظ بيانات الدفع' : 'Failed to save payment settings', locale === 'ar');
+        }
+      } catch (e) {
+        await errorDialog(locale === 'ar' ? 'حدث خطأ أثناء الحفظ' : 'An error occurred while saving', locale === 'ar');
+      }
+      return;
+    }
+    // Non-vendor: local only
+    console.log('Payment settings saved (local):', paymentSettings);
   };
 
   const handlePasswordChange = async () => {
@@ -127,6 +150,21 @@ export default function VendorSettings(props: VendorSettingsProps) {
 
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  // Preload current IBAN from profile if available
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await getProfile();
+        if (res.ok && res.data) {
+          const anyUser: any = res.data;
+          if (anyUser && anyUser.iban) {
+            setPaymentSettings((curr) => ({ ...curr, iban: anyUser.iban }));
+          }
+        }
+      } catch {}
+    })();
   }, []);
 
   // When locale changes at runtime, update defaults ONLY if values match previous defaults (to avoid clobbering user edits)

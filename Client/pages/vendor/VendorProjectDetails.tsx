@@ -11,6 +11,7 @@ import { Input } from '../../components/ui/input';
 import { Textarea } from '../../components/ui/textarea';
 import { Separator } from '../../components/ui/separator';
 import { Package, Layers, Ruler, Boxes, ClipboardList, Calendar, Send, ArrowRight, Info } from 'lucide-react';
+import { getProjectById, getMyBids, createBid } from '@/services/projects';
 
 interface Props extends Partial<RouteContext> {}
 
@@ -39,6 +40,7 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
     };
     return map[id]?.[locale === 'ar' ? 'ar' : 'en'] || id;
   };
+
   const labelForMaterial = (id?: string) => {
     if (!id) return '';
     const map: any = {
@@ -50,42 +52,38 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
     return map[id]?.[locale === 'ar' ? 'ar' : 'en'] || id;
   };
 
-  // Load selected project id from localStorage
+  // Load selected project by id from backend (id is stored just for navigation)
   useEffect(() => {
-    try {
-      const id = localStorage.getItem('selected_vendor_project_id');
-      const raw = localStorage.getItem('user_projects');
-      if (!id || !raw) return;
-      const list = JSON.parse(raw);
-      if (Array.isArray(list)) {
-        const found = list.find((p: any) => String(p.id) === String(id));
-        setProject(found || null);
+    (async () => {
+      try {
+        const id = typeof window !== 'undefined' ? window.localStorage.getItem('selected_vendor_project_id') : null;
+        if (!id) { setLoading(false); return; }
+        const { ok, data } = await getProjectById(Number(id));
+        if (ok && data) setProject(data as any);
+        else setProject(null);
+      } finally {
+        setLoading(false);
       }
-    } catch {}
-    finally { setLoading(false); }
+    })();
   }, []);
 
-  // Check if current vendor already submitted a proposal for this project
+  // Check if current vendor already submitted a bid via backend
   useEffect(() => {
-    try {
-      if (!project) { setHasSubmitted(false); return; }
-      const vendorId = (context as any)?.user?.id;
-      const raw = window.localStorage.getItem('vendor_proposals');
-      const list = raw ? JSON.parse(raw) : [];
-      const exists = Array.isArray(list)
-        ? list.some((x:any) => x.targetType==='project' && String(x.targetId)===String(project.id) && (!!vendorId ? x.vendorId===vendorId : true))
-        : false;
-      setHasSubmitted(exists);
-      if (Array.isArray(list) && vendorId) {
-        const mine = list.find((x:any) => x.targetType==='project' && String(x.targetId)===String(project.id) && x.vendorId===vendorId);
+    (async () => {
+      try {
+        if (!project) { setHasSubmitted(false); setMyProposal(null); return; }
+        const { ok, data } = await getMyBids();
+        const list = ok && Array.isArray(data) ? (data as any[]) : [];
+        const mine = list.find((b:any)=> String(b.projectId) === String(project.id));
+        setHasSubmitted(!!mine);
         setMyProposal(mine || null);
         if (mine && !editingProposalId) setEditingProposalId(String(mine.id));
-      } else {
+      } catch {
+        setHasSubmitted(false);
         setMyProposal(null);
-        setEditingProposalId(null);
       }
-    } catch { setHasSubmitted(false); }
-  }, [project, (context as any)?.user?.id]);
+    })();
+  }, [project, editingProposalId]);
 
   const itemsArray = useMemo(() => Array.isArray(project?.items) ? project!.items : [], [project]);
 
@@ -132,7 +130,9 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
               <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center">
                 <Info className="w-6 h-6 text-muted-foreground" />
               </div>
-              <p className="text-lg font-medium">{locale==='ar' ? 'لا توجد تفاصيل متاحة لهذا المشروع.' : 'No details available for this project.'}</p>
+              <p className="text-lg font-medium">
+                {locale==='ar' ? 'لا توجد تفاصيل متاحة لهذا المشروع.' : 'No details available for this project.'}
+              </p>
               <div className="pt-1">
                 <Button onClick={back} className="inline-flex items-center gap-1">
                   {locale==='ar' ? 'رجوع للمشاريع' : 'Back to Projects'} <ArrowRight className="w-4 h-4" />
@@ -150,7 +150,9 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Package className="w-6 h-6 text-primary" />
-                    <h1 className="text-2xl font-bold">{locale==='ar' ? 'تفاصيل المشروع' : 'Project Details'}</h1>
+                    <h1 className="text-2xl font-bold">
+                      {locale==='ar' ? 'تفاصيل المشروع' : 'Project Details'}
+                    </h1>
                   </div>
                 </div>
 
@@ -162,7 +164,9 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                     </Badge>
                   )}
                   {!!project.material && (
-                    <Badge variant="outline" className="rounded-full text-xs">{labelForMaterial(project.material)}</Badge>
+                    <Badge variant="outline" className="rounded-full text-xs">
+                      {labelForMaterial(project.material)}
+                    </Badge>
                   )}
                   <Badge variant="outline" className="rounded-full text-xs">
                     {(project.width||0)} × {(project.height||0)} m
@@ -177,6 +181,7 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                   )}
                 </div>
               </div>
+
               <CardContent className="p-6 space-y-6">
                 {/* Info grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -184,7 +189,9 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                     <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                       <Package className="w-4 h-4" /> {locale==='ar' ? 'نوع المنتج' : 'Product Type'}
                     </div>
-                    <div className="mt-1 font-medium">{labelForProductType(project.ptype || project.type) || '-'}</div>
+                    <div className="mt-1 font-medium">
+                      {labelForProductType(project.ptype || project.type) || '-'}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 bg-background shadow-sm">
                     <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -196,7 +203,10 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                     <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                       <Ruler className="w-4 h-4" /> {locale==='ar' ? 'الأبعاد (متر)' : 'Dimensions (m)'}
                     </div>
-                    <div className="mt-1 font-medium">{(project.width||0)} × {(project.height||0)}<span className="text-muted-foreground text-xs ms-1">m</span></div>
+                    <div className="mt-1 font-medium">
+                      {(project.width||0)} × {(project.height||0)}
+                      <span className="text-muted-foreground text-xs ms-1">m</span>
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 bg-background shadow-sm">
                     <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -216,13 +226,17 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
 
                 {/* Description */}
                 <div className="space-y-2">
-                  <div className="text-sm text-muted-foreground">{locale==='ar' ? 'الوصف' : 'Description'}</div>
+                  <div className="text-sm text-muted-foreground">
+                    {locale==='ar' ? 'الوصف' : 'Description'}
+                  </div>
                   {project.description ? (
                     <div className="text-sm leading-relaxed whitespace-pre-wrap bg-muted/30 border rounded-md p-3">
                       {project.description}
                     </div>
                   ) : (
-                    <div className="text-sm text-muted-foreground">{locale==='ar' ? 'لا يوجد وصف مضاف.' : 'No description provided.'}</div>
+                    <div className="text-sm text-muted-foreground">
+                      {locale==='ar' ? 'لا يوجد وصف مضاف.' : 'No description provided.'}
+                    </div>
                   )}
                 </div>
 
@@ -245,7 +259,10 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                               <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                                 <Ruler className="w-4 h-4" /> {locale==='ar' ? 'الأبعاد (متر)' : 'Dimensions (m)'}
                               </div>
-                              <div className="mt-1 font-medium">{(it?.width||0)} × {(it?.height||0)}<span className="text-muted-foreground text-xs ms-1">m</span></div>
+                              <div className="mt-1 font-medium">
+                                {(it?.width||0)} × {(it?.height||0)}
+                                <span className="text-muted-foreground text-xs ms-1">m</span>
+                              </div>
                             </div>
                             <div>
                               <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -289,12 +306,20 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
 
               <Card>
                 <CardHeader>
-                  <CardTitle>{isEditing ? (locale==='ar' ? 'تعديل عرضي' : 'Edit My Offer') : (hasSubmitted ? (locale==='ar' ? 'تم الإرسال' : 'Submitted') : (locale==='ar' ? 'تقديم عرض' : 'Submit Proposal'))}</CardTitle>
+                  <CardTitle>
+                    {isEditing
+                      ? (locale==='ar' ? 'تعديل عرضي' : 'Edit My Offer')
+                      : (hasSubmitted
+                          ? (locale==='ar' ? 'تم الإرسال' : 'Submitted')
+                          : (locale==='ar' ? 'تقديم عرض' : 'Submit Proposal')
+                        )
+                    }
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {hasSubmitted && !isEditing ? (
                     <div className="space-y-3 text-sm">
-                      {myProposal ? (
+                      {myProposal && (
                         <>
                           <div className="flex items-center justify-between">
                             <span className="text-muted-foreground">{locale==='ar' ? 'السعر المقدم' : 'Submitted Price'}</span>
@@ -308,18 +333,22 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                             <div className="text-muted-foreground whitespace-pre-wrap">{myProposal.message}</div>
                           )}
                         </>
-                      ) : null}
+                      )}
                       <div className="pt-2">
-                        <Button className="w-full" variant="outline" onClick={() => {
-                          const p = myProposal;
-                          if (p) {
-                            setOfferPrice(String(p.price ?? ''));
-                            setOfferDays(String(p.days ?? ''));
-                            setOfferMessage(String(p.message ?? ''));
-                            setEditingProposalId(String(p.id));
-                          }
-                          setIsEditing(true);
-                        }}>
+                        <Button
+                          className="w-full"
+                          variant="outline"
+                          onClick={() => {
+                            const p = myProposal;
+                            if (p) {
+                              setOfferPrice(String(p.price ?? ''));
+                              setOfferDays(String(p.days ?? ''));
+                              setOfferMessage(String(p.message ?? ''));
+                              setEditingProposalId(String(p.id));
+                            }
+                            setIsEditing(true);
+                          }}
+                        >
                           {locale==='ar' ? 'تعديل عرضي' : 'Edit my offer'}
                         </Button>
                       </div>
@@ -333,9 +362,11 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                           inputMode="decimal"
                           min={minPrice || 0}
                           max={maxPrice || undefined}
-                          placeholder={locale==='ar'
-                            ? `الحد الأدنى: ${currency} ${formatMoney(minPrice)} • الحد الأقصى: ${currency} ${formatMoney(maxPrice)}`
-                            : `Min: ${currency} ${formatMoney(minPrice)} • Max: ${currency} ${formatMoney(maxPrice)}`}
+                          placeholder={
+                            locale==='ar'
+                              ? `الحد الأدنى: ${currency} ${formatMoney(minPrice)} • الحد الأقصى: ${currency} ${formatMoney(maxPrice)}`
+                              : `Min: ${currency} ${formatMoney(minPrice)} • Max: ${currency} ${formatMoney(maxPrice)}`
+                          }
                           value={offerPrice}
                           onChange={(e)=> setOfferPrice(e.target.value)}
                         />
@@ -360,6 +391,7 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                           );
                         })()}
                       </div>
+
                       <div className="grid gap-2">
                         <label className="text-sm">{locale==='ar' ? 'المدة (أيام)' : 'Duration (days)'}</label>
                         <Input
@@ -367,9 +399,11 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                           inputMode="numeric"
                           min={1}
                           max={Number(project?.days) > 0 ? Number(project?.days) : undefined}
-                          placeholder={Number(project?.days) > 0
-                            ? (locale==='ar' ? `من 1 إلى ${Number(project?.days)} يوم` : `From 1 to ${Number(project?.days)} days`)
-                            : (locale==='ar' ? 'أقل قيمة: 1 يوم' : 'Minimum: 1 day')}
+                          placeholder={
+                            Number(project?.days) > 0
+                              ? (locale==='ar' ? `من 1 إلى ${Number(project?.days)} يوم` : `From 1 to ${Number(project?.days)} days`)
+                              : (locale==='ar' ? 'أقل قيمة: 1 يوم' : 'Minimum: 1 day')
+                          }
                           value={offerDays}
                           onChange={(e)=>setOfferDays(e.target.value)}
                         />
@@ -395,14 +429,21 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                           );
                         })()}
                       </div>
+
                       <div className="grid gap-2">
                         <label className="text-sm">{locale==='ar' ? 'رسالة' : 'Message'}</label>
-                        <Textarea rows={4} placeholder={locale==='ar' ? 'عرّف بنفسك وقدّم تفاصيل العرض' : 'Introduce yourself and provide details of your offer'} value={offerMessage} onChange={(e)=>setOfferMessage(e.target.value)} />
+                        <Textarea
+                          rows={4}
+                          placeholder={locale==='ar' ? 'عرّف بنفسك وقدّم تفاصيل العرض' : 'Introduce yourself and provide details of your offer'}
+                          value={offerMessage}
+                          onChange={(e)=>setOfferMessage(e.target.value)}
+                        />
                       </div>
+
                       <Button
                         className="w-full"
                         disabled={(() => {
-                          if (saving || !project) return true;
+                          if (saving || !project || (hasSubmitted && !isEditing)) return true;
                           const vP = Number(offerPrice);
                           const vD = Number(offerDays);
                           const validP = offerPrice !== '' && isFinite(vP) && vP >= (minPrice||0) && vP <= (maxPrice||Number.POSITIVE_INFINITY);
@@ -412,7 +453,6 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                         })()}
                         onClick={() => {
                           if (!project) return;
-                          // Strict validation (no clamping)
                           const vP = Number(offerPrice);
                           const vD = Number(offerDays);
                           if (!isFinite(vP) || vP < (minPrice||0) || vP > (maxPrice||Number.POSITIVE_INFINITY)) {
@@ -436,65 +476,25 @@ export default function VendorProjectDetails({ setCurrentPage, ...context }: Pro
                             });
                             return;
                           }
-                          try {
-                            setSaving(true);
-                            const raw = window.localStorage.getItem('vendor_proposals');
-                            const list = raw ? JSON.parse(raw) : [];
-                            if (isEditing && editingProposalId && Array.isArray(list)) {
-                              const next = list.map((x:any)=> x.id===editingProposalId ? { ...x, price: vP, days: vD, message: offerMessage || '' } : x);
-                              window.localStorage.setItem('vendor_proposals', JSON.stringify(next));
-                              setMyProposal((prev:any)=> prev ? { ...prev, price: vP, days: vD, message: offerMessage || '' } : prev);
-                              setIsEditing(false);
-                              Swal.fire({ icon: 'success', title: locale==='ar' ? 'تم تحديث العرض' : 'Offer updated', timer: 1600, showConfirmButton: false });
-                            } else {
-                              const proposal = {
-                                id: `prop_${Date.now()}`,
-                                targetType: 'project' as const,
-                                targetId: project.id,
-                                targetSnapshot: project,
-                                price: vP,
-                                days: vD,
-                                message: offerMessage,
-                                vendorId: (context as any)?.user?.id || null,
-                                status: 'pending',
-                                createdAt: new Date().toISOString(),
-                              };
-                              // final guard to avoid duplicates
-                              const exists = Array.isArray(list) && list.some((x:any)=> x.targetType==='project' && String(x.targetId)===String(project.id) && x.vendorId === ((context as any)?.user?.id || null));
-                              if (!exists) list.push(proposal);
-                              window.localStorage.setItem('vendor_proposals', JSON.stringify(list));
-                              setHasSubmitted(true);
-                              setMyProposal(proposal);
-                              setEditingProposalId(String(proposal.id));
-                              // Create notification to project owner
-                              try {
-                                const recipientId = project.userId || project.user?.id || null;
-                                const vendorName = (context as any)?.user?.name || (context as any)?.user?.username || (context as any)?.user?.email || (locale==='ar' ? 'بائع' : 'Vendor');
-                                const title = locale==='ar' ? 'تم تقديم عرض على مشروعك' : 'New proposal on your project';
-                                const numLocale = locale==='ar' ? 'ar-EG' : 'en-US';
-                                const desc = locale==='ar'
-                                  ? `${vendorName} قدّم عرضًا بقيمة ${currency} ${Number(offerPrice).toLocaleString(numLocale)} لمدة ${Number(offerDays)} يوم`
-                                  : `${vendorName} submitted an offer of ${currency} ${Number(offerPrice).toLocaleString(numLocale)} for ${Number(offerDays)} days`;
-                                const nraw = window.localStorage.getItem('app_notifications');
-                                const nlist = nraw ? JSON.parse(nraw) : [];
-                                const notif = {
-                                  id: `ntf_${Date.now()}`,
-                                  type: 'proposal',
-                                  recipientId,
-                                  recipientRole: 'user',
-                                  title,
-                                  desc,
-                                  createdAt: new Date().toISOString(),
-                                  meta: { targetType: 'project', targetId: project.id }
-                                };
-                                const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                                window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                              } catch {}
-                              Swal.fire({ icon: 'success', title: locale==='ar' ? 'تم إرسال العرض' : 'Proposal Sent', timer: 1800, showConfirmButton: false });
+                          (async () => {
+                            try {
+                              setSaving(true);
+                              const res = await createBid(Number(project.id), { price: vP, days: vD, message: offerMessage });
+                              if (res.ok) {
+                                setHasSubmitted(true);
+                                try {
+                                  const mb = await getMyBids();
+                                  if (mb.ok && Array.isArray(mb.data)) {
+                                    setMyProposal((mb.data as any[]).find(b=> String(b.projectId)===String(project.id)) || null);
+                                  }
+                                } catch {}
+                                if (isEditing) setIsEditing(false);
+                                Swal.fire({ icon: 'success', title: locale==='ar' ? 'تم إرسال العرض' : 'Proposal submitted', timer: 1600, showConfirmButton: false });
+                              }
+                            } finally {
+                              setSaving(false);
                             }
-                          } finally {
-                            setSaving(false);
-                          }
+                          })();
                         }}
                       >
                         <Send className="mr-2 h-4 w-4" /> {saving ? (locale==='ar' ? 'جارٍ الحفظ...' : 'Saving...') : (isEditing ? (locale==='ar' ? 'حفظ التعديلات' : 'Save Changes') : (locale==='ar' ? 'إرسال العرض' : 'Send Proposal'))}

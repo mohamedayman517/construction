@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -7,65 +8,45 @@ import { RouteContext } from './Router';
 import { useTranslation } from '../hooks/useTranslation';
 import { formatCurrency } from '../utils/vendorHelpers';
 import Swal from 'sweetalert2';
+import { getFeaturedProducts } from '@/services/products';
 
-const products = [
-  {
-    id: 1,
-    name: 'فلتر زيت أصلي تويوتا كامري',
-    nameEn: 'Genuine Toyota Camry Oil Filter',
-    price: 85,
-    originalPrice: 120,
-    rating: 4.8,
-    reviews: 156,
-    image: 'https://images.unsplash.com/photo-1752774579270-523a9e91e6d4?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYXIlMjBlbmdpbmUlMjBwYXJ0cyUyMGF1dG9tb3RpdmV8ZW58MXx8fHwxNzU0MDYzODU0fDA&ixlib=rb-4.1.0&q=80&w=1080',
-    badge: 'الأكثر مبيعاً',
-    badgeEn: 'Best Seller',
-    badgeColor: 'bg-red-500'
-  },
-  {
-    id: 2,
-    name: 'إطار ميشلان 225/60R16',
-    nameEn: 'Michelin Tire 225/60R16',
-    price: 450,
-    originalPrice: 520,
-    rating: 4.9,
-    reviews: 203,
-    image: 'https://images.unsplash.com/photo-1710009437292-77d057fd47f2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYXIlMjB0aXJlcyUyMHdoZWVscyUyMGF1dG9tb3RpdmV8ZW58MXx8fHwxNzU0MDYzODU3fDA&ixlib=rb-4.1.0&q=80&w=1080',
-    badge: 'خصم 15%',
-    badgeEn: '15% Off',
-    badgeColor: 'bg-green-500'
-  },
-  {
-    id: 3,
-    name: 'بطارية دلكو 70 أمبير',
-    nameEn: 'Delco Battery 70 Ah',
-    price: 280,
-    originalPrice: 350,
-    rating: 4.7,
-    reviews: 89,
-    image: 'https://images.unsplash.com/photo-1621992906830-b3f3aabac38b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxjYXIlMjBlbGVjdHJpY2FsJTIwcGFydHMlMjBiYXR0ZXJ5fGVufDF8fHx8MTc1NDA2Mzg2NHww&ixlib=rb-4.1.0&q=80&w=1080',
-    badge: 'ضمانة سنتين',
-    badgeEn: '2-Year Warranty',
-    badgeColor: 'bg-blue-500'
-  },
-  {
-    id: 4,
-    name: 'طقم عدد الكترونية 120 قطعة',
-    nameEn: 'Electronic Tool Kit 120 pcs',
-    price: 320,
-    originalPrice: 380,
-    rating: 4.6,
-    reviews: 145,
-    image: 'https://images.unsplash.com/photo-1727413434026-0f8314c037d8?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxhdXRvbW90aXZlJTIwdG9vbHMlMjBnYXJhZ2UlMjBlcXVpcG1lbnR8ZW58MXx8fHwxNzU0MDYzODYxfDA&ixlib=rb-4.1.0&q=80&w=1080',
-    badge: 'جودة ممتازة',
-    badgeEn: 'Premium Quality',
-    badgeColor: 'bg-purple-500'
-  }
-];
+// No static fallback; we will render an empty state if no products are returned.
 
 export default function BestSellingProducts({ setSelectedProduct, setCurrentPage, isInWishlist, addToWishlist, removeFromWishlist, addToCart, setSearchFilters, user }: Partial<RouteContext>) {
   const { t, locale } = useTranslation();
   const isVendor = user?.role === 'vendor';
+  const [products, setProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { ok, data } = await getFeaturedProducts();
+        if (!cancelled && ok && Array.isArray(data)) {
+          const mapped = (data as any[]).map((p) => ({
+            id: p.id,
+            name: locale === 'en' ? (p.nameEn ?? p.name) : (p.nameAr ?? p.nameEn ?? p.name),
+            nameEn: p.nameEn ?? p.name,
+            price: p.discountPrice ?? p.price ?? 0,
+            originalPrice: p.discountPrice ? p.price : undefined,
+            rating: p.averageRating ?? 0,
+            reviews: p.reviewCount ?? 0,
+            image: (p.images && p.images.length ? (p.images.find((i: any) => i.isPrimary)?.imageUrl || p.images[0].imageUrl) : undefined),
+            badge: p.discountPrice ? (locale === 'ar' ? 'خصم' : 'Sale') : (locale === 'ar' ? 'الأكثر مبيعاً' : 'Best Seller'),
+            badgeEn: p.discountPrice ? 'Sale' : 'Best Seller',
+            badgeColor: p.discountPrice ? 'bg-green-500' : 'bg-red-500',
+          }));
+          setProducts(mapped);
+        }
+      } catch {
+        // leave products empty on error
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [locale]);
   const handleProductClick = (product: any) => {
     setSelectedProduct && setSelectedProduct(product);
     setCurrentPage && setCurrentPage('product-details');
@@ -79,17 +60,35 @@ export default function BestSellingProducts({ setSelectedProduct, setCurrentPage
             {t('bestSellingDescription')}
           </p>
         </div>
+        
 
+        {loading && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="animate-pulse h-64 bg-gray-100 rounded" />
+            ))}
+          </div>
+        )}
+        {!loading && products.length === 0 && (
+          <div className="text-center text-muted-foreground mb-8">
+            {locale === 'ar' ? 'لا توجد منتجات لعرضها حالياً.' : 'No products to display yet.'}
+          </div>
+        )}
+        {!loading && products.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {products.map((product) => (
             <Card key={product.id} className="group hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer" onClick={() => handleProductClick(product)}>
               <div className="relative">
                 <div className="relative h-48 overflow-hidden">
-                  <ImageWithFallback
-                    src={product.image}
-                    alt={locale === 'en' ? (product.nameEn ?? product.name) : product.name}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
+                  {product.image ? (
+                    <ImageWithFallback
+                      src={product.image}
+                      alt={locale === 'en' ? (product.nameEn ?? product.name) : product.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gray-100" />
+                  )}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors duration-300"></div>
                 </div>
                 <Badge className={`absolute top-2 right-2 ${product.badgeColor} text-white`}>
@@ -197,6 +196,7 @@ export default function BestSellingProducts({ setSelectedProduct, setCurrentPage
             </Card>
           ))}
         </div>
+        )}
 
         <div className="text-center">
           <Button variant="outline" size="lg" onClick={() => {

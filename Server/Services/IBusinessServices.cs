@@ -18,6 +18,8 @@ namespace ConstructionMarketplace.Services
         Task<bool> DeleteProductAsync(int id, string merchantId);
         Task<bool> UpdateStockAsync(int id, int newStock);
         Task<bool> IncrementViewCountAsync(int id);
+        Task<bool> ApproveProductAsync(int id);
+        Task<bool> RejectProductAsync(int id, string reason);
     }
 
     public interface ICategoryService

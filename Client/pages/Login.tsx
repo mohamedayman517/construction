@@ -26,7 +26,7 @@ export default function Login({ setCurrentPage, setUser, returnTo, setReturnTo, 
   const roleDest = (role: 'admin' | 'vendor' | 'technician' | 'customer') => {
     if (returnTo) return returnTo;
     if (role === 'admin') return 'admin-dashboard';
-    if (role === 'vendor') return 'home';
+    if (role === 'vendor') return 'vendor-dashboard';
     if (role === 'technician') return 'home';
     return 'home';
   };

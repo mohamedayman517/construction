@@ -229,6 +229,10 @@ namespace ConstructionMarketplace.DTOs
         public string? Bio { get; set; }
 
         public DateTime? DateOfBirth { get; set; }
+
+        // Optional merchant banking info
+        [MaxLength(34)]
+        public string? Iban { get; set; }
     }
 
     public class TokenValidationDto
@@ -237,6 +241,12 @@ namespace ConstructionMarketplace.DTOs
         public string? UserId { get; set; }
         public List<string> Roles { get; set; } = new List<string>();
         public string Message { get; set; } = string.Empty;
+    }
+
+    public class UpdateIbanDto
+    {
+        [MaxLength(34)]
+        public string? Iban { get; set; }
     }
 }
 

@@ -10,8 +10,8 @@ import Header from '../../components/Header';
 import Footer from '../../components/Footer';
 import ProductForm from '../../components/vendor/ProductForm';
 import ProductItem from '../../components/vendor/ProductItem';
-import { productCategories, productBrands } from '../../data/vendorMockData';
-import { getMyProducts, createProduct, updateProduct, deleteProduct } from '@/services/products';
+import { getMyProducts, createProduct, updateProduct, deleteProduct, getAllCategories } from '@/services/products';
+import { getToken } from '@/services/auth';
 import { useTranslation } from '../../hooks/useTranslation';
 import { confirmDialog } from '../../utils/alerts';
 
@@ -25,6 +25,8 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
   const [selectedBrand, setSelectedBrand] = useState('all');
+  const [categories, setCategories] = useState<Array<{ id: string; name: string }>>([]);
+  const [brands, setBrands] = useState<string[]>([]);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<any>(null);
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -36,23 +38,27 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
     let cancelled = false;
 
     const load = async () => {
+      const token = getToken?.();
+      if (!token) { if (!cancelled) setProducts([]); return; }
       try {
         const { ok, data } = await getMyProducts();
         if (ok && Array.isArray(data)) {
           const list = data.map((p: any) => ({
             id: p.id,
-            name: p.name || p.title || '',
+            name: p.name || p.nameAr || p.nameEn || p.title || '',
             nameAr: p.nameAr || p.name || '',
             nameEn: p.nameEn || p.name || '',
-            brand: p.brand || 'عام',
-            category: (p.category?.name) || '',
+            brand: p.brand || '',
+            category: (p.categoryName) || (p.category?.name) || '',
             subCategoryAr: '',
             subCategoryEn: '',
             price: Number(p.price || 0),
             originalPrice: Number(p.originalPrice || p.price || 0),
-            stock: Number(p.stock ?? 0),
-            status: p.status || 'active',
-            image: p.imageUrl || 'https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=200',
+            stock: Number(p.stockQuantity ?? p.stock ?? 0),
+            // derive status: pending if not approved
+            status: p.isApproved ? 'active' : 'pending',
+            isApproved: Boolean(p.isApproved),
+            image: (Array.isArray(p.images) && p.images[0]?.imageUrl) ? p.images[0].imageUrl : (p.imageUrl || ''),
             images: Array.isArray(p.images) ? p.images : (p.imageUrl ? [p.imageUrl] : []),
             isNew: Boolean(p.isNew),
             isOnSale: Boolean(p.isOnSale),
@@ -64,7 +70,12 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
             sales: (p as any).sales || 0,
             views: (p as any).views || 0,
           }));
-          if (!cancelled) setProducts(list);
+          if (!cancelled) {
+            setProducts(list);
+            // derive brands from data
+            const bset = Array.from(new Set(list.map(p => String(p.brand || '')).filter(Boolean)));
+            setBrands(bset);
+          }
           return;
         }
       } catch {}
@@ -72,6 +83,23 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
     };
 
     load();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Load categories dynamically
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const token = getToken?.();
+      if (!token) return;
+      try {
+        const { ok, data } = await getAllCategories();
+        if (ok && Array.isArray(data) && !cancelled) {
+          const mapped = (data as any[]).map(c => ({ id: String(c.id), name: c.nameAr || c.nameEn || c.name || '' }));
+          setCategories(mapped);
+        }
+      } catch {}
+    })();
     return () => { cancelled = true; };
   }, []);
 
@@ -88,7 +116,7 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
     }
 
     if (selectedCategory && selectedCategory !== 'all') {
-      filtered = filtered.filter(product => product.category === selectedCategory);
+      filtered = filtered.filter(product => String(product.category) === String(selectedCategory));
     }
 
     if (selectedStatus && selectedStatus !== 'all') {
@@ -96,7 +124,7 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
     }
 
     if (selectedBrand && selectedBrand !== 'all') {
-      filtered = filtered.filter(product => product.brand === selectedBrand);
+      filtered = filtered.filter(product => String(product.brand) === String(selectedBrand));
     }
 
     setFilteredProducts(filtered);
@@ -200,16 +228,17 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
       if (ok && Array.isArray(data)) {
         const list = data.map((p: any) => ({
           id: p.id,
-          name: p.name || '',
+          name: p.name || p.nameAr || p.nameEn || '',
           nameAr: p.nameAr || p.name || '',
           nameEn: p.nameEn || p.name || '',
           brand: p.brand || 'عام',
-          category: (p.category?.name) || '',
+          category: (p.categoryName) || (p.category?.name) || '',
           price: Number(p.price || 0),
           originalPrice: Number(p.originalPrice || p.price || 0),
-          stock: Number(p.stock ?? 0),
-          status: p.status || 'active',
-          image: p.imageUrl || 'https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=200',
+          stock: Number(p.stockQuantity ?? p.stock ?? 0),
+          status: p.isApproved ? 'active' : 'pending',
+          isApproved: Boolean(p.isApproved),
+          image: (Array.isArray(p.images) && p.images[0]?.imageUrl) ? p.images[0].imageUrl : (p.imageUrl || 'https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=200'),
           images: Array.isArray(p.images) ? p.images : (p.imageUrl ? [p.imageUrl] : []),
         }));
         setProducts(list);
@@ -229,6 +258,8 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
       categoryId: undefined,
     });
     setIsAddDialogOpen(false);
+    // Inform vendor that item awaits admin approval
+    try { alert(locale === 'en' ? 'Your product was submitted and is pending admin approval.' : 'تم إرسال منتجك وهو قيد المراجعة من الأدمن.'); } catch {}
     await reload();
   };
 
@@ -364,8 +395,8 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{locale === 'en' ? 'All Categories' : 'جميع الفئات'}</SelectItem>
-                    {productCategories.map(category => (
-                      <SelectItem key={category} value={category}>{category}</SelectItem>
+                    {categories.map(c => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -376,7 +407,7 @@ export default function VendorProducts({ setCurrentPage, setSelectedProduct, ...
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">{locale === 'en' ? 'All Brands' : 'جميع العلامات'}</SelectItem>
-                    {productBrands.map(brand => (
+                    {brands.map(brand => (
                       <SelectItem key={brand} value={brand}>{brand}</SelectItem>
                     ))}
                   </SelectContent>

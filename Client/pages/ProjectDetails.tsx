@@ -11,7 +11,7 @@ import { Ruler, Package, Layers, Boxes, ClipboardList, Calendar, ArrowRight, Edi
 import { Input } from '../components/ui/input';
 import { Textarea } from '../components/ui/textarea';
 import Swal from 'sweetalert2';
-import { getProjectById } from '@/services/projects';
+import { getProjectById, getProjectBids, createBid, acceptBid, rejectBid, type BidDto } from '@/services/projects';
 
 // Keep catalogs in sync with ProjectsBuilder/Projects
 const productTypes = [
@@ -36,11 +36,12 @@ const accessoriesCatalog = [
 interface ProjectDetailsProps extends Partial<RouteContext> {}
 
 export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: ProjectDetailsProps) {
-  const { t, locale } = useTranslation();
+  const { locale } = useTranslation();
   const currency = locale === 'ar' ? 'ر.س' : 'SAR';
+
   const [project, setProject] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
-  const [proposals, setProposals] = useState<any[]>([]);
+  const [proposals, setProposals] = useState<BidDto[]>([]);
   const currentUserId = (rest as any)?.user?.id ? String((rest as any).user.id) : '';
   const isLoggedIn = Boolean((rest as any)?.user);
   const isVendor = ((rest as any)?.user?.role === 'vendor');
@@ -53,7 +54,7 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
-  const [myProposal, setMyProposal] = useState<any | null>(null);
+  const [myProposal, setMyProposal] = useState<BidDto | null>(null);
 
   // Load selected project by id: backend first, then localStorage fallback
   useEffect(() => {
@@ -92,41 +93,32 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
             }
           }
         }
-        // Load proposals addressed to this project (local only)
+        // Load bids (merchant proposals) from backend
         try {
-          const propRaw = localStorage.getItem('vendor_proposals');
-          const propList = propRaw ? JSON.parse(propRaw) : [];
-          const filtered = Array.isArray(propList) ? propList.filter((p:any)=> p.targetType === 'project' && String(p.targetId) === String(id)) : [];
-          if (!cancelled) setProposals(filtered);
+          const pid = Number(localStorage.getItem('selected_project_id') || '0');
+          if (pid) {
+            const r = await getProjectBids(pid);
+            if (!cancelled && r.ok && Array.isArray(r.data)) setProposals(r.data as BidDto[]);
+          }
         } catch {}
       } catch {}
       finally { if (!cancelled) setLoading(false); }
     })();
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Track if this vendor already submitted a proposal for this project
   useEffect(() => {
     try {
       if (!project || !isVendor) { setHasSubmitted(false); setMyProposal(null); return; }
-      const vendorId = (rest as any)?.user?.id;
-      const raw = window.localStorage.getItem('vendor_proposals');
-      const list = raw ? JSON.parse(raw) : [];
-      const exists = Array.isArray(list)
-        ? list.some((x:any) => x.targetType==='project' && String(x.targetId)===String(project.id) && (!!vendorId ? x.vendorId===vendorId : true))
-        : false;
-      setHasSubmitted(exists);
-      if (Array.isArray(list) && vendorId) {
-        const mine = list.find((x:any) => x.targetType==='project' && String(x.targetId)===String(project.id) && x.vendorId===vendorId);
-        setMyProposal(mine || null);
-        if (mine && !editingProposalId) setEditingProposalId(String(mine.id));
-      } else {
-        setMyProposal(null);
-        setEditingProposalId(null);
-      }
-    } catch { setHasSubmitted(false); }
-  }, [project, (rest as any)?.user?.id, isVendor]);
+      const vendorId = (rest as any)?.user?.id; // currently not used in filtering
+      const mine = proposals.find((b:any)=> String(b.projectId)===String(project.id) && (!!vendorId ? true : true));
+      setHasSubmitted(!!mine);
+      setMyProposal(mine || null);
+      if (mine && !editingProposalId) setEditingProposalId(String(mine.id));
+    } catch { setHasSubmitted(false); setMyProposal(null); }
+  }, [project, (rest as any)?.user?.id, isVendor, proposals, editingProposalId]);
 
   const typeLabel = useMemo(() => productTypes.find(pt => pt.id === (project?.ptype || project?.type))?.[locale==='ar'?'ar':'en'] || '', [project, locale]);
   const materialLabel = useMemo(() => materials.find(m => m.id === project?.material)?.[locale==='ar'?'ar':'en'] || '', [project, locale]);
@@ -256,9 +248,16 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
               <div className="mx-auto w-12 h-12 rounded-full bg-muted flex items-center justify-center">
                 <Info className="w-6 h-6 text-muted-foreground" />
               </div>
-              <p className="text-lg font-medium">{locale==='ar' ? (isLoggedIn ? 'غير مصرح لك بعرض هذا المشروع.' : 'الرجاء تسجيل الدخول لعرض المشاريع.') : (isLoggedIn ? 'You are not authorized to view this project.' : 'Please sign in to view projects.')}</p>
+              <p className="text-lg font-medium">
+                {locale==='ar'
+                  ? (isLoggedIn ? 'غير مصرح لك بعرض هذا المشروع.' : 'الرجاء تسجيل الدخول لعرض المشاريع.')
+                  : (isLoggedIn ? 'You are not authorized to view this project.' : 'Please sign in to view projects.')
+                }
+              </p>
               {!isVendor && (
-                <p className="text-sm text-muted-foreground">{locale==='ar' ? 'هذه الصفحة تعرض فقط مشاريع المالك.' : 'This page only shows projects owned by the current user.'}</p>
+                <p className="text-sm text-muted-foreground">
+                  {locale==='ar' ? 'هذه الصفحة تعرض فقط مشاريع المالك.' : 'This page only shows projects owned by the current user.'}
+                </p>
               )}
               <div className="pt-1">
                 <Button onClick={back} className="inline-flex items-center gap-1">
@@ -294,6 +293,7 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                     <div className="mt-1 font-medium">{Number(project?.days) > 0 ? project.days : '-'}</div>
                   </div>
                 </div>
+
                 {/* Quick summary chips */}
                 <div className="flex flex-wrap gap-2 mt-4">
                   {materialLabel && (
@@ -315,6 +315,7 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                   )}
                 </div>
               </div>
+
               <CardContent className="p-6 space-y-6">
                 {/* Info grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -328,7 +329,9 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                     <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                       <Ruler className="w-4 h-4" /> {locale==='ar' ? 'الأبعاد (متر)' : 'Dimensions (m)'}
                     </div>
-                    <div className="mt-1 font-medium">{(project.width||0)} × {(project.height||0)}<span className="text-muted-foreground text-xs ms-1">m</span></div>
+                    <div className="mt-1 font-medium">
+                      {(project.width||0)} × {(project.height||0)}<span className="text-muted-foreground text-xs ms-1">m</span>
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 bg-background shadow-sm">
                     <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -336,7 +339,7 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                     </div>
                     <div className="mt-1 font-medium">{project.quantity || 0}</div>
                   </div>
-                  <div className="rounded-lg border p-4 bg-background shadow-sm">
+                  <div className="rounded-lg border p-4 bg-background shadowسم">
                     <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                       <ClipboardList className="w-4 h-4" /> {locale==='ar' ? 'سعر المتر المربع' : 'Price per m²'}
                     </div>
@@ -345,6 +348,7 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                 </div>
 
                 <Separator />
+
                 {/* Accessories */}
                 <div className="space-y-2">
                   <div className="text-sm text-muted-foreground">{locale==='ar' ? 'الملحقات' : 'Accessories'}</div>
@@ -406,7 +410,9 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                                 <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                                   <Ruler className="w-4 h-4" /> {locale==='ar' ? 'الأبعاد (متر)' : 'Dimensions (m)'}
                                 </div>
-                                <div className="mt-1 font-medium">{(it?.width||0)} × {(it?.height||0)}<span className="text-muted-foreground text-xs ms-1">m</span></div>
+                                <div className="mt-1 font-medium">
+                                  {(it?.width||0)} × {(it?.height||0)}<span className="text-muted-foreground text-xs ms-1">m</span>
+                                </div>
                               </div>
                               <div>
                                 <div className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-2">
@@ -490,11 +496,14 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
             {/* Sidebar */}
             <div className="space-y-4">
               {isVendor ? (
-                // Vendor: submit/edit my proposal
                 <>
                   <Card>
                     <CardHeader>
-                      <CardTitle>{(project?.customerName || project?.userName || project?.user?.name) ? (locale==='ar' ? 'صاحب الطلب' : 'Customer') : (locale==='ar' ? 'تفاصيل' : 'Details')}</CardTitle>
+                      <CardTitle>
+                        {(project?.customerName || project?.userName || project?.user?.name)
+                          ? (locale==='ar' ? 'صاحب الطلب' : 'Customer')
+                          : (locale==='ar' ? 'تفاصيل' : 'Details')}
+                      </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="text-sm">
@@ -505,12 +514,20 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
 
                   <Card>
                     <CardHeader>
-                      <CardTitle>{isEditing ? (locale==='ar' ? 'تعديل عرضي' : 'Edit My Offer') : (hasSubmitted ? (locale==='ar' ? 'تم الإرسال' : 'Submitted') : (locale==='ar' ? 'تقديم عرض' : 'Submit Proposal'))}</CardTitle>
+                      <CardTitle>
+                        {isEditing
+                          ? (locale==='ar' ? 'تعديل عرضي' : 'Edit My Offer')
+                          : (hasSubmitted
+                              ? (locale==='ar' ? 'تم الإرسال' : 'Submitted')
+                              : (locale==='ar' ? 'تقديم عرض' : 'Submit Proposal')
+                            )
+                        }
+                      </CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-3">
                       {hasSubmitted && !isEditing ? (
                         <div className="space-y-3 text-sm">
-                          {myProposal ? (
+                          {myProposal && (
                             <>
                               <div className="flex items-center justify-between">
                                 <span className="text-muted-foreground">{locale==='ar' ? 'السعر المقدم' : 'Submitted Price'}</span>
@@ -524,24 +541,15 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                                 <div className="text-muted-foreground whitespace-pre-wrap">{myProposal.message}</div>
                               )}
                             </>
-                          ) : null}
+                          )}
                           <div className="pt-2">
-                            <Button className="w-full" variant="outline" onClick={() => {
-                              const p = myProposal;
-                              if (p) {
-                                setOfferPrice(String(p.price ?? ''));
-                                setOfferDays(String(p.days ?? ''));
-                                setOfferMessage(String(p.message ?? ''));
-                                setEditingProposalId(String(p.id));
-                              }
-                              setIsEditing(true);
-                            }}>
+                            <Button className="w-full" variant="outline" disabled>
                               {locale==='ar' ? 'تعديل عرضي' : 'Edit my offer'}
                             </Button>
                           </div>
                         </div>
                       ) : (
-                        <>
+                        <div>
                           <div className="grid gap-2">
                             <label className="text-sm">{locale==='ar' ? 'السعر المقترح' : 'Proposed Price'}</label>
                             <Input
@@ -549,9 +557,11 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                               inputMode="decimal"
                               min={minPrice || 0}
                               max={maxPrice || undefined}
-                              placeholder={locale==='ar'
-                                ? `الحد الأدنى: ${currency} ${formatMoney(minPrice)} • الحد الأقصى: ${currency} ${formatMoney(maxPrice)}`
-                                : `Min: ${currency} ${formatMoney(minPrice)} • Max: ${currency} ${formatMoney(maxPrice)}`}
+                              placeholder={
+                                locale==='ar'
+                                  ? `الحد الأدنى: ${currency} ${formatMoney(minPrice)} • الحد الأقصى: ${currency} ${formatMoney(maxPrice)}`
+                                  : `Min: ${currency} ${formatMoney(minPrice)} • Max: ${currency} ${formatMoney(maxPrice)}`
+                              }
                               value={offerPrice}
                               onChange={(e)=> setOfferPrice(e.target.value)}
                             />
@@ -576,6 +586,7 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                               );
                             })()}
                           </div>
+
                           <div className="grid gap-2">
                             <label className="text-sm">{locale==='ar' ? 'المدة (أيام)' : 'Duration (days)'}</label>
                             <Input
@@ -583,9 +594,11 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                               inputMode="numeric"
                               min={1}
                               max={Number(project?.days) > 0 ? Number(project?.days) : undefined}
-                              placeholder={Number(project?.days) > 0
-                                ? (locale==='ar' ? `من 1 إلى ${Number(project?.days)} يوم` : `From 1 to ${Number(project?.days)} days`)
-                                : (locale==='ar' ? 'أقل قيمة: 1 يوم' : 'Minimum: 1 day')}
+                              placeholder={
+                                Number(project?.days) > 0
+                                  ? (locale==='ar' ? `من 1 إلى ${Number(project?.days)} يوم` : `From 1 to ${Number(project?.days)} days`)
+                                  : (locale==='ar' ? 'أقل قيمة: 1 يوم' : 'Minimum: 1 day')
+                              }
                               value={offerDays}
                               onChange={(e)=>setOfferDays(e.target.value)}
                             />
@@ -611,110 +624,53 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                               );
                             })()}
                           </div>
+
                           <div className="grid gap-2">
                             <label className="text-sm">{locale==='ar' ? 'رسالة' : 'Message'}</label>
-                            <Textarea rows={4} placeholder={locale==='ar' ? 'عرّف بنفسك وقدّم تفاصيل العرض' : 'Introduce yourself and provide details of your offer'} value={offerMessage} onChange={(e)=>setOfferMessage(e.target.value)} />
+                            <Textarea
+                              rows={4}
+                              placeholder={locale==='ar' ? 'عرّف بنفسك وقدّم تفاصيل العرض' : 'Introduce yourself and provide details of your offer'}
+                              value={offerMessage}
+                              onChange={(e)=>setOfferMessage(e.target.value)}
+                            />
                           </div>
-                          <Button
-                            className="w-full"
-                            disabled={(() => {
-                              if (saving || !project) return true;
-                              const vP = Number(offerPrice);
-                              const vD = Number(offerDays);
-                              const validP = offerPrice !== '' && isFinite(vP) && vP >= (minPrice||0) && vP <= (maxPrice||Number.POSITIVE_INFINITY);
-                              const maxD = Number(project?.days) > 0 ? Number(project?.days) : Infinity;
-                              const validD = offerDays !== '' && Number.isFinite(vD) && vD >= 1 && vD <= maxD;
-                              return !(validP && validD);
-                            })()}
-                            onClick={() => {
-                              if (!project) return;
-                              // Strict validation (no clamping)
-                              const vP = Number(offerPrice);
-                              const vD = Number(offerDays);
-                              if (!isFinite(vP) || vP < (minPrice||0) || vP > (maxPrice||Number.POSITIVE_INFINITY)) {
-                                Swal.fire({
-                                  icon: 'error',
-                                  title: locale==='ar' ? 'قيمة السعر غير صحيحة' : 'Invalid price',
-                                  text: locale==='ar'
-                                    ? `يجب أن يكون السعر بين ${currency} ${formatMoney(minPrice)} و ${currency} ${formatMoney(maxPrice)}`
-                                    : `Price must be between ${currency} ${formatMoney(minPrice)} and ${currency} ${formatMoney(maxPrice)}`,
-                                });
-                                return;
-                              }
-                              const maxD = Number(project?.days) > 0 ? Number(project?.days) : Infinity;
-                              if (!Number.isFinite(vD) || vD < 1 || vD > maxD) {
-                                Swal.fire({
-                                  icon: 'error',
-                                  title: locale==='ar' ? 'قيمة الأيام غير صحيحة' : 'Invalid days',
-                                  text: Number.isFinite(maxD)
-                                    ? (locale==='ar' ? `عدد الأيام يجب أن يكون بين 1 و ${maxD}` : `Days must be between 1 and ${maxD}`)
-                                    : (locale==='ar' ? 'عدد الأيام يجب ألا يقل عن 1' : 'Days must be at least 1'),
-                                });
-                                return;
-                              }
-                              try {
-                                setSaving(true);
-                                const raw = window.localStorage.getItem('vendor_proposals');
-                                const list = raw ? JSON.parse(raw) : [];
-                                if (isEditing && editingProposalId && Array.isArray(list)) {
-                                  const next = list.map((x:any)=> x.id===editingProposalId ? { ...x, price: vP, days: vD, message: offerMessage || '' } : x);
-                                  window.localStorage.setItem('vendor_proposals', JSON.stringify(next));
-                                  setMyProposal((prev:any)=> prev ? { ...prev, price: vP, days: vD, message: offerMessage || '' } : prev);
-                                  setIsEditing(false);
-                                  Swal.fire({ icon: 'success', title: locale==='ar' ? 'تم تحديث العرض' : 'Offer updated', timer: 1600, showConfirmButton: false });
-                                } else {
-                                  const proposal = {
-                                    id: `prop_${Date.now()}`,
-                                    targetType: 'project' as const,
-                                    targetId: project.id,
-                                    targetSnapshot: project,
-                                    price: vP,
-                                    days: vD,
-                                    message: offerMessage,
-                                    vendorId: (rest as any)?.user?.id || null,
-                                    status: 'pending',
-                                    createdAt: new Date().toISOString(),
-                                  };
-                                  const exists = Array.isArray(list) && list.some((x:any)=> x.targetType==='project' && String(x.targetId)===String(project.id) && x.vendorId === ((rest as any)?.user?.id || null));
-                                  if (!exists) list.push(proposal);
-                                  window.localStorage.setItem('vendor_proposals', JSON.stringify(list));
-                                  setHasSubmitted(true);
-                                  setMyProposal(proposal);
-                                  setEditingProposalId(String(proposal.id));
-                                  // Create notification to project owner
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <Button
+                              disabled={(() => {
+                                if (saving || hasSubmitted) return true;
+                                const vP = Number(offerPrice);
+                                const vD = Number(offerDays);
+                                const validP = offerPrice !== '' && isFinite(vP) && vP >= (minPrice||0) && vP <= (maxPrice||Number.POSITIVE_INFINITY);
+                                const maxD = Number(project?.days) > 0 ? Number(project?.days) : Infinity;
+                                const validD = offerDays !== '' && Number.isFinite(vD) && vD >= 1 && vD <= maxD;
+                                return !(validP && validD);
+                              })()}
+                              onClick={() => {
+                                (async () => {
                                   try {
-                                    const recipientId = project.userId || project.user?.id || project.ownerId || null;
-                                    const vendorName = (rest as any)?.user?.name || (rest as any)?.user?.username || (rest as any)?.user?.email || (locale==='ar' ? 'بائع' : 'Vendor');
-                                    const title = locale==='ar' ? 'تم تقديم عرض على مشروعك' : 'New proposal on your project';
-                                    const numLocale = locale==='ar' ? 'ar-EG' : 'en-US';
-                                    const desc = locale==='ar'
-                                      ? `${vendorName} قدّم عرضًا بقيمة ${currency} ${Number(offerPrice).toLocaleString(numLocale)} لمدة ${Number(offerDays)} يوم`
-                                      : `${vendorName} submitted an offer of ${currency} ${Number(offerPrice).toLocaleString(numLocale)} for ${Number(offerDays)} days`;
-                                    const nraw = window.localStorage.getItem('app_notifications');
-                                    const nlist = nraw ? JSON.parse(nraw) : [];
-                                    const notif = {
-                                      id: `ntf_${Date.now()}`,
-                                      type: 'proposal',
-                                      recipientId,
-                                      recipientRole: 'user',
-                                      title,
-                                      desc,
-                                      createdAt: new Date().toISOString(),
-                                      meta: { targetType: 'project', targetId: project.id }
-                                    };
-                                    const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                                    window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                                  } catch {}
-                                  Swal.fire({ icon: 'success', title: locale==='ar' ? 'تم إرسال العرض' : 'Proposal Sent', timer: 1800, showConfirmButton: false });
-                                }
-                              } finally {
-                                setSaving(false);
-                              }
-                            }}
-                          >
-                            <Send className="mr-2 h-4 w-4" /> {saving ? (locale==='ar' ? 'جارٍ الحفظ...' : 'Saving...') : (isEditing ? (locale==='ar' ? 'حفظ التعديلات' : 'Save Changes') : (locale==='ar' ? 'إرسال العرض' : 'Send Proposal'))}
-                          </Button>
-                        </>
+                                    setSaving(true);
+                                    if (!project) return;
+                                    const vP = Number(offerPrice);
+                                    const vD = Number(offerDays);
+                                    const res = await createBid(Number(project.id), { price: vP, days: vD, message: offerMessage });
+                                    if (res.ok) {
+                                      const r = await getProjectBids(Number(project.id));
+                                      if (r.ok && Array.isArray(r.data)) setProposals(r.data as BidDto[]);
+                                      setOfferPrice(''); setOfferDays(''); setOfferMessage('');
+                                      setHasSubmitted(true);
+                                      Swal.fire({ icon: 'success', title: locale==='ar' ? 'تم إرسال العرض' : 'Proposal submitted', timer: 1600, showConfirmButton: false });
+                                    }
+                                  } finally {
+                                    setSaving(false);
+                                  }
+                                })();
+                              }}
+                            >
+                              <Send className="mr-2 h-4 w-4" /> {saving ? (locale==='ar' ? 'جارٍ الحفظ...' : 'Saving...') : (isEditing ? (locale==='ar' ? 'حفظ التعديلات' : 'Save Changes') : (locale==='ar' ? 'إرسال العرض' : 'Send Proposal'))}
+                            </Button>
+                          </div>
+                        </div>
                       )}
                     </CardContent>
                   </Card>
@@ -735,76 +691,39 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                           <div key={pp.id} className="border rounded-md p-3">
                             <div className="flex items-center justify-between">
                               <div className="text-sm font-medium">{locale==='ar' ? 'السعر' : 'Price'}: {currency} {Number(pp.price||0).toLocaleString(locale==='ar'?'ar-EG':'en-US')}</div>
-                              <Badge variant={pp.status==='accepted'? 'secondary' : pp.status==='rejected'? 'destructive' : 'outline'} className="text-xs capitalize">{locale==='ar' ? (pp.status==='pending'?'معلق': pp.status==='accepted'?'مقبول':'مرفوض') : pp.status}</Badge>
+                              <Badge variant={pp.status==='accepted'? 'secondary' : pp.status==='rejected'? 'destructive' : 'outline'} className="text-xs capitalize">
+                                {locale==='ar' ? (pp.status==='pending'?'معلق': pp.status==='accepted'?'مقبول':'مرفوض') : pp.status}
+                              </Badge>
                             </div>
                             <div className="text-sm text-muted-foreground">{locale==='ar' ? 'المدة' : 'Days'}: {Number(pp.days||0)}</div>
                             {pp.message && <div className="mt-1 text-xs bg-muted/20 rounded p-2">{pp.message}</div>}
                             {pp.status === 'pending' && (
                               <div className="mt-2 flex items-center gap-2">
-                                <Button size="sm" className="flex-1" onClick={() => {
+                                <Button size="sm" className="flex-1" onClick={async () => {
                                   try {
-                                    const raw = localStorage.getItem('vendor_proposals');
-                                    const list = raw ? JSON.parse(raw) : [];
-                                    const next = list.map((x:any)=> x.id===pp.id ? { ...x, status: 'accepted' } : x);
-                                    localStorage.setItem('vendor_proposals', JSON.stringify(next));
-                                    setProposals((prev)=> prev.map((x:any)=> x.id===pp.id ? { ...x, status: 'accepted' } : x));
-                                    // Notify vendor about acceptance
-                                    try {
-                                      const nraw = localStorage.getItem('app_notifications');
-                                      const nlist = nraw ? JSON.parse(nraw) : [];
-                                      const numLocale = locale==='ar' ? 'ar-EG' : 'en-US';
-                                      const title = locale==='ar' ? 'تم قبول عرضك' : 'Your proposal was accepted';
-                                      const desc = locale==='ar'
-                                        ? `تم قبول عرضك بقيمة ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} لمدة ${Number(pp.days||0)} يوم`
-                                        : `Your offer of ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} for ${Number(pp.days||0)} days was accepted`;
-                                      const notif = {
-                                        id: `ntf_${Date.now()}`,
-                                        type: 'proposal-status',
-                                        recipientId: pp.vendorId,
-                                        recipientRole: 'vendor',
-                                        title,
-                                        desc,
-                                        createdAt: new Date().toISOString(),
-                                        meta: { targetType: 'project', targetId: (project as any)?.id, proposalId: pp.id, status: 'accepted' }
-                                      };
-                                      const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                                      localStorage.setItem('app_notifications', JSON.stringify(combined));
-                                    } catch {}
+                                    const r = await acceptBid(Number(pp.id));
+                                    if (r.ok && project) {
+                                      const rd = await getProjectBids(Number(project.id));
+                                      if (rd.ok && Array.isArray(rd.data)) setProposals(rd.data as BidDto[]);
+                                    }
                                   } catch {}
                                 }}>
                                   <Check className="w-4 h-4 ml-1" /> {locale==='ar' ? 'قبول' : 'Accept'}
                                 </Button>
-                                <Button size="sm" variant="destructive" className="flex-1 bg-red-600 hover:bg-red-700 text-white border border-red-600" onClick={() => {
-                                  try {
-                                    const raw = localStorage.getItem('vendor_proposals');
-                                    const list = raw ? JSON.parse(raw) : [];
-                                    const next = list.map((x:any)=> x.id===pp.id ? { ...x, status: 'rejected' } : x);
-                                    localStorage.setItem('vendor_proposals', JSON.stringify(next));
-                                    setProposals((prev)=> prev.map((x:any)=> x.id===pp.id ? { ...x, status: 'rejected' } : x));
-                                    // Notify vendor about rejection
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  className="flex-1 bg-red-600 hover:bg-red-700 text-white border border-red-600"
+                                  onClick={async () => {
                                     try {
-                                      const nraw = localStorage.getItem('app_notifications');
-                                      const nlist = nraw ? JSON.parse(nraw) : [];
-                                      const numLocale = locale==='ar' ? 'ar-EG' : 'en-US';
-                                      const title = locale==='ar' ? 'تم رفض عرضك' : 'Your proposal was rejected';
-                                      const desc = locale==='ar'
-                                        ? `تم رفض عرضك بقيمة ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} لمدة ${Number(pp.days||0)} يوم`
-                                        : `Your offer of ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} for ${Number(pp.days||0)} days was rejected`;
-                                      const notif = {
-                                        id: `ntf_${Date.now()}`,
-                                        type: 'proposal-status',
-                                        recipientId: pp.vendorId,
-                                        recipientRole: 'vendor',
-                                        title,
-                                        desc,
-                                        createdAt: new Date().toISOString(),
-                                        meta: { targetType: 'project', targetId: (project as any)?.id, proposalId: pp.id, status: 'rejected' }
-                                      };
-                                      const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                                      localStorage.setItem('app_notifications', JSON.stringify(combined));
+                                      const r = await rejectBid(Number(pp.id));
+                                      if (r.ok && project) {
+                                        const rd = await getProjectBids(Number(project.id));
+                                        if (rd.ok && Array.isArray(rd.data)) setProposals(rd.data as BidDto[]);
+                                      }
                                     } catch {}
-                                  } catch {}
-                                }}>
+                                  }}
+                                >
                                   <X className="w-4 h-4 ml-1" /> {locale==='ar' ? 'رفض' : 'Reject'}
                                 </Button>
                               </div>
@@ -817,7 +736,7 @@ export default function ProjectDetails({ setCurrentPage, goBack, ...rest }: Proj
                 </Card>
               )}
             </div>
-        </div>
+          </div>
         )}
       </div>
 

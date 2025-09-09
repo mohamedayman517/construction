@@ -10,6 +10,8 @@ import { Input } from "../../components/ui/input";
 import { useTranslation } from "../../hooks/useTranslation";
 import type { RouteContext } from "../../components/routerTypes";
 import Swal from "sweetalert2";
+import { listPublicServices } from "@/services/servicesCatalog";
+import { createOffer, getTechnicianOffers, updateOffer } from "@/services/offers";
 
 interface Props extends Partial<RouteContext> {}
 
@@ -20,6 +22,7 @@ export default function TechnicianServiceDetails({ setCurrentPage, ...context }:
   const technicianId = (context as any)?.user?.id || null;
 
   const [service, setService] = useState<any | null>(null);
+  const [myOffers, setMyOffers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
@@ -31,75 +34,60 @@ export default function TechnicianServiceDetails({ setCurrentPage, ...context }:
   const [isEditing, setIsEditing] = useState(false);
   const [myOffer, setMyOffer] = useState<any | null>(null);
 
-  // Load selected service by id from localStorage (set by TechnicianServices)
+  // Load selected service by id using backend public services
   useEffect(() => {
-    try {
-      if (typeof window === 'undefined') return;
-      const id = window.localStorage.getItem('selected_technician_service_id') || window.localStorage.getItem('selected_service_id');
-      if (!id) { setLoading(false); return; }
-      const raw = window.localStorage.getItem('user_services');
-      const list = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(list)) {
-        const found = list.find((s:any)=> String(s.id) === String(id));
-        setService(found || null);
-      }
-    } finally { setLoading(false); }
+    (async () => {
+      try {
+        if (typeof window === 'undefined') { setLoading(false); return; }
+        const id = window.localStorage.getItem('selected_technician_service_id') || window.localStorage.getItem('selected_service_id');
+        if (!id) { setLoading(false); return; }
+        const { ok, data } = await listPublicServices();
+        if (ok && Array.isArray(data)) {
+          const found = (data as any[]).find((s:any) => String(s.id) === String(id));
+          setService(found || null);
+        } else {
+          setService(null);
+        }
+      } finally { setLoading(false); }
+    })();
   }, []);
 
-  // Check if current technician already submitted a request for this service
+  // Load my offers and determine if submitted
   useEffect(() => {
-    try {
-      if (!service) { setHasSubmitted(false); return; }
-      const raw = window.localStorage.getItem('technician_requests');
-      const list = raw ? JSON.parse(raw) : [];
-      const exists = Array.isArray(list)
-        ? list.some((x:any) => x.targetType==='service' && String(x.serviceId)===String(service.id) && (!!technicianId ? x.technicianId===technicianId : true))
-        : false;
-      setHasSubmitted(!!exists);
-    } catch { setHasSubmitted(false); }
+    (async () => {
+      try {
+        if (!service || !technicianId) { setHasSubmitted(false); setMyOffers([]); return; }
+        const { ok, data } = await getTechnicianOffers(String(technicianId));
+        const offers = ok && Array.isArray(data) ? (data as any[]) : [];
+        setMyOffers(offers);
+        const exists = offers.some((o:any)=> String(o.targetType).toLowerCase()==='service' && String(o.serviceId)===String(service.id));
+        setHasSubmitted(exists);
+      } catch { setHasSubmitted(false); setMyOffers([]); }
+    })();
   }, [service, technicianId]);
 
-  // If navigated from profile to edit an existing offer, preload values
+  // If we have an existing offer, preload for edit when requested later
   useEffect(() => {
     try {
-      if (!service) return;
-      const editId = window.localStorage.getItem('editing_technician_offer_id');
-      if (!editId) { setEditingOfferId(null); setIsEditing(false); return; }
-      const raw = window.localStorage.getItem('technician_requests');
-      const list = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(list)) return;
-      const offer = list.find((x:any)=> x.id===editId && x.targetType==='service' && String(x.serviceId)===String(service.id) && (!!technicianId ? x.technicianId===technicianId : true));
+      if (!service || !technicianId) { setEditingOfferId(null); setIsEditing(false); setMyOffer(null); return; }
+      const offer = myOffers.find((o:any)=> String(o.targetType).toLowerCase()==='service' && String(o.serviceId)===String(service.id));
       if (offer) {
-        setEditingOfferId(editId);
-        setIsEditing(true);
-        setOfferPrice(String(offer.price ?? ''));
-        setOfferDays(String(offer.days ?? ''));
-        setOfferMessage(String(offer.message ?? ''));
         setMyOffer(offer);
       } else {
-        setEditingOfferId(null);
-        setIsEditing(false);
         setMyOffer(null);
       }
-    } catch {
-      setEditingOfferId(null);
-      setIsEditing(false);
-      setMyOffer(null);
-    }
-  }, [service, technicianId]);
+    } catch { setMyOffer(null); }
+  }, [service, technicianId, myOffers]);
 
-  // Track my existing offer for this service to show summary and allow in-page edit
+  // Track my existing offer for this service based on backend-loaded offers
   useEffect(() => {
     try {
       if (!service || !technicianId) { setMyOffer(null); return; }
-      const raw = window.localStorage.getItem('technician_requests');
-      const list = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(list)) { setMyOffer(null); return; }
-      const offer = list.find((x:any)=> x.targetType==='service' && String(x.serviceId)===String(service.id) && x.technicianId===technicianId);
+      const offer = myOffers.find((o:any)=> String(o.targetType).toLowerCase()==='service' && String(o.serviceId)===String(service.id));
       setMyOffer(offer || null);
       if (!editingOfferId && !isEditing && offer) setEditingOfferId(String(offer.id));
     } catch { setMyOffer(null); }
-  }, [service, technicianId, hasSubmitted]);
+  }, [service, technicianId, hasSubmitted, myOffers, editingOfferId, isEditing]);
 
   const labelForServiceType = (t?: string) => {
     switch ((t || '').toLowerCase()) {
@@ -232,10 +220,6 @@ export default function TechnicianServiceDetails({ setCurrentPage, ...context }:
                 ) : (
                   <>
                     {(() => { return null; })()}
-                    {(() => { return null; })()}
-                    {(() => { return null; })()}
-                    {(() => { return null; })()}
-                    {(() => { return null; })()}
                 <div className="grid gap-2">
                   <Label>{isAr ? 'السعر المقترح' : 'Proposed Price'}</Label>
                   <Input
@@ -357,63 +341,39 @@ export default function TechnicianServiceDetails({ setCurrentPage, ...context }:
                       });
                       return;
                     }
-                    try {
-                      setSaving(true);
-                      const raw = window.localStorage.getItem('technician_requests');
-                      const list = raw ? JSON.parse(raw) : [];
-                      if (isEditing && editingOfferId && Array.isArray(list)) {
-                        const next = list.map((x:any)=> x.id===editingOfferId ? { ...x, price: priceNum, days: daysNum, message: offerMessage || '' } : x);
-                        window.localStorage.setItem('technician_requests', JSON.stringify(next));
-                        try { window.localStorage.removeItem('editing_technician_offer_id'); } catch {}
-                        setIsEditing(false);
-                        Swal.fire({ icon: 'success', title: isAr ? 'تم تحديث العرض' : 'Offer updated', timer: 1600, showConfirmButton: false });
-                      } else {
-                        const request = {
-                          id: `treq_${Date.now()}`,
-                          targetType: 'service' as const,
-                          serviceId: service.id,
-                          price: priceNum,
-                          days: daysNum,
-                          message: offerMessage || '',
-                          technicianId,
-                          status: 'pending',
-                          createdAt: new Date().toISOString(),
-                        };
-                        const exists = Array.isArray(list) && list.some((x:any)=> x.targetType==='service' && String(x.serviceId)===String(service.id) && (!!technicianId ? x.technicianId===technicianId : true));
-                        if (!exists) list.push(request);
-                        window.localStorage.setItem('technician_requests', JSON.stringify(list));
-
-                        // Notify service owner (vendor)
-                        try {
-                          const recipientId = service.userId || service.user?.id || null;
-                          const techName = (context as any)?.user?.name || (context as any)?.user?.username || (context as any)?.user?.email || (isAr ? 'فني' : 'Technician');
-                          const title = isAr ? 'عرض جديد على خدمتك' : 'New proposal on your service';
-                          const numLocale2 = isAr ? 'ar-EG' : 'en-US';
-                          const desc = isAr
-                            ? `${techName} قدّم عرضًا بقيمة ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale2)} لمدة ${Number(offerDays || 0)} يوم`
-                            : `${techName} submitted a proposal of ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale2)} for ${Number(offerDays || 0)} days`;
-                          const nraw = window.localStorage.getItem('app_notifications');
-                          const nlist = nraw ? JSON.parse(nraw) : [];
-                          const notif = {
-                            id: `ntf_${Date.now()}`,
-                            type: 'proposal',
-                            recipientId,
-                            recipientRole: 'vendor',
-                            title,
-                            description: desc,
-                            createdAt: new Date().toISOString(),
-                            read: false,
-                          };
-                          const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                          window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                        } catch {}
-
-                        setHasSubmitted(true);
-                        Swal.fire({ icon: 'success', title: isAr ? 'تم إرسال العرض' : 'Proposal submitted', timer: 1800, showConfirmButton: false });
+                    (async () => {
+                      try {
+                        setSaving(true);
+                        if (isEditing && myOffer && myOffer.id) {
+                          const up = await updateOffer(Number(myOffer.id), { targetType: 'service', serviceId: Number(service.id), price: priceNum, days: daysNum, message: offerMessage || '' });
+                          if (up.ok) {
+                            setIsEditing(false);
+                            // refresh offers
+                            try {
+                              if (technicianId) {
+                                const { ok, data } = await getTechnicianOffers(String(technicianId));
+                                if (ok && Array.isArray(data)) setMyOffers(data as any[]);
+                              }
+                            } catch {}
+                            Swal.fire({ icon: 'success', title: isAr ? 'تم تحديث العرض' : 'Offer updated', timer: 1600, showConfirmButton: false });
+                          }
+                        } else {
+                          const cr = await createOffer({ targetType: 'service', serviceId: Number(service.id), price: priceNum, days: daysNum, message: offerMessage || '' });
+                          if (cr.ok) {
+                            setHasSubmitted(true);
+                            try {
+                              if (technicianId) {
+                                const { ok, data } = await getTechnicianOffers(String(technicianId));
+                                if (ok && Array.isArray(data)) setMyOffers(data as any[]);
+                              }
+                            } catch {}
+                            Swal.fire({ icon: 'success', title: isAr ? 'تم إرسال العرض' : 'Proposal submitted', timer: 1800, showConfirmButton: false });
+                          }
+                        }
+                      } finally {
+                        setSaving(false);
                       }
-                    } finally {
-                      setSaving(false);
-                    }
+                    })();
                   }}
                 >
                   {saving

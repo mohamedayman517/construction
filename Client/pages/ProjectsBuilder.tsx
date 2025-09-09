@@ -4,6 +4,7 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import type { RouteContext } from '../components/routerTypes';
 import { useTranslation } from '../hooks/useTranslation';
+import { createProject as apiCreateProject, updateProject as apiUpdateProject } from '@/services/projects';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Card, CardContent } from '../components/ui/card';
@@ -273,9 +274,11 @@ export default function ProjectsBuilder({ setCurrentPage, ...rest }: RouteContex
       currentUser = uRaw ? JSON.parse(uRaw) : null;
     } catch {}
 
-    const mainProj = {
-      id: editingId || Math.random().toString(36).slice(2),
-      ptype,
+    // Map to backend CreateProjectDto
+    const payload: any = {
+      title: description ? (locale==='ar' ? 'مشروع' : 'Project') : undefined,
+      description,
+      type: ptype,
       psubtype,
       material,
       color,
@@ -283,34 +286,20 @@ export default function ProjectsBuilder({ setCurrentPage, ...rest }: RouteContex
       height,
       quantity,
       days,
-      autoPrice,
       pricePerMeter: mainPPM,
-      selectedAcc,
-      description,
-      // total should represent ALL items (main + additional)
       total: grandTotal,
-      createdAt: Date.now(),
-      // keep additional forms as nested items to avoid multiple saved projects
       items,
-      // requester info for vendor views
-      customerName: currentUser?.name || currentUser?.username || currentUser?.email || null,
-      userId: currentUser?.id ?? null,
-      user: currentUser ? { id: currentUser.id, name: currentUser.name || currentUser.username || currentUser.email } : undefined,
     };
-    try {
-      const raw = window.localStorage.getItem('user_projects');
-      const prev = raw ? JSON.parse(raw) : [];
-      let next;
-      if (editingId) {
-        // replace the existing project with same id; keep others
-        next = prev.map((p:any) => p.id === editingId ? mainProj : p);
-      } else {
-        // Save only ONE project entry regardless of number of forms
-        next = [mainProj, ...prev];
-      }
-      window.localStorage.setItem('user_projects', JSON.stringify(next));
-    } catch {}
-    setCurrentPage && setCurrentPage('projects');
+    (async () => {
+      try {
+        if (editingId) {
+          await apiUpdateProject(editingId, payload);
+        } else {
+          await apiCreateProject(payload);
+        }
+      } catch {}
+      setCurrentPage && setCurrentPage('projects');
+    })();
   };
 
   return (

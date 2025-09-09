@@ -19,6 +19,7 @@ namespace ConstructionMarketplace.Services
         private readonly IWebHostEnvironment _env;
         private readonly IUserRepository _userRepository;
         private readonly ILogger<AuthService> _logger;
+        private readonly IFileStorageService _fileStorageService;
 
         public AuthService(
             UserManager<ApplicationUser> userManager,
@@ -26,7 +27,8 @@ namespace ConstructionMarketplace.Services
             IConfiguration configuration,
             IWebHostEnvironment env,
             IUserRepository userRepository,
-            ILogger<AuthService> logger)
+            ILogger<AuthService> logger,
+            IFileStorageService fileStorageService)
         {
             _userManager = userManager;
             _signInManager = signInManager;
@@ -34,6 +36,34 @@ namespace ConstructionMarketplace.Services
             _env = env;
             _userRepository = userRepository;
             _logger = logger;
+            _fileStorageService = fileStorageService;
+        }
+
+        public async Task<bool> UpdateIbanAsync(string userId, string iban)
+        {
+            try
+            {
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null)
+                    return false;
+
+                if (string.IsNullOrWhiteSpace(iban))
+                    return false;
+
+                var trimmed = iban.Trim();
+                if (!System.Text.RegularExpressions.Regex.IsMatch(trimmed, @"^SA\d{2}[A-Z0-9]{18}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    return false;
+
+                user.Iban = trimmed.ToUpperInvariant();
+                user.UpdatedAt = DateTime.UtcNow;
+                var result = await _userManager.UpdateAsync(user);
+                return result.Succeeded;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating IBAN for user: {UserId}", userId);
+                return false;
+            }
         }
 
         public async Task<AuthResponseDto> LoginAsync(LoginDto loginDto)
@@ -61,24 +91,17 @@ namespace ConstructionMarketplace.Services
                 }
 
                 var roles = await _userManager.GetRolesAsync(user);
-                // If merchant not yet verified, block login
-                if (roles.Contains("Merchant") && !user.IsVerified)
-                {
-                    return new AuthResponseDto
-                    {
-                        Success = false,
-                        Message = "Your account is pending admin approval. Please wait for approval.",
-                        User = MapToUserDto(user, roles.ToList())
-                    };
-                }
-
+                // If merchant not yet verified, allow login but inform client (dev-friendly)
+                // Token will be issued so vendor can access profile and own data while awaiting approval
                 var token = GenerateJwtToken(user, roles);
                 var tokenExpiration = DateTime.UtcNow.AddDays(_configuration.GetValue<int>("Jwt:ExpireDays"));
 
                 return new AuthResponseDto
                 {
                     Success = true,
-                    Message = "Login successful.",
+                    Message = roles.Contains("Merchant") && !user.IsVerified
+                        ? "Login successful. Your merchant account is pending admin approval."
+                        : "Login successful.",
                     Token = token,
                     TokenExpiration = tokenExpiration,
                     User = MapToUserDto(user, roles.ToList())
@@ -145,7 +168,7 @@ namespace ConstructionMarketplace.Services
                     };
                 }
 
-                // Save Cloudinary URLs if provided, otherwise save uploaded files
+                // Save Cloudinary URLs if provided, otherwise upload incoming files to Cloudinary
                 try
                 {
                     bool changed = false;
@@ -169,53 +192,27 @@ namespace ConstructionMarketplace.Services
                         changed = true;
                     }
 
-                    // If URLs were not provided, fallback to storing files on disk (legacy)
+                    // If URLs were not provided, upload files to Cloudinary
                     if (!changed)
                     {
-                        var webRoot = _env.WebRootPath;
-                        if (string.IsNullOrWhiteSpace(webRoot))
-                        {
-                            webRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-                        }
-                        var vendorDir = Path.Combine(webRoot, "uploads", "vendors", user.Id);
-                        Directory.CreateDirectory(vendorDir);
-
                         if (registerDto.ImageFile != null && registerDto.ImageFile.Length > 0)
                         {
-                            var imgName = $"img_{DateTime.UtcNow:yyyyMMddHHmmssfff}_{Path.GetFileName(registerDto.ImageFile.FileName)}";
-                            var imgPath = Path.Combine(vendorDir, imgName);
-                            using (var fs = new FileStream(imgPath, FileMode.Create))
-                            {
-                                await registerDto.ImageFile.CopyToAsync(fs);
-                            }
-                            var rel = $"/uploads/vendors/{user.Id}/{imgName}".Replace("\\", "/");
-                            user.ProfilePicture = rel;
+                            var upload = await _fileStorageService.UploadAsync(registerDto.ImageFile, $"uploads/vendors/{user.Id}");
+                            user.ProfilePicture = upload.Url;
                             changed = true;
                         }
 
                         if (registerDto.DocumentFile != null && registerDto.DocumentFile.Length > 0)
                         {
-                            var docName = $"doc_{DateTime.UtcNow:yyyyMMddHHmmssfff}_{Path.GetFileName(registerDto.DocumentFile.FileName)}";
-                            var docPath = Path.Combine(vendorDir, docName);
-                            using (var fs = new FileStream(docPath, FileMode.Create))
-                            {
-                                await registerDto.DocumentFile.CopyToAsync(fs);
-                            }
-                            var rel = $"/uploads/vendors/{user.Id}/{docName}".Replace("\\", "/");
-                            user.VendorDocumentPath = rel;
+                            var upload = await _fileStorageService.UploadAsync(registerDto.DocumentFile, $"uploads/vendors/{user.Id}");
+                            user.VendorDocumentPath = upload.Url;
                             changed = true;
                         }
 
                         if (registerDto.LicenseImage != null && registerDto.LicenseImage.Length > 0)
                         {
-                            var licName = $"lic_{DateTime.UtcNow:yyyyMMddHHmmssfff}_{Path.GetFileName(registerDto.LicenseImage.FileName)}";
-                            var licPath = Path.Combine(vendorDir, licName);
-                            using (var fs = new FileStream(licPath, FileMode.Create))
-                            {
-                                await registerDto.LicenseImage.CopyToAsync(fs);
-                            }
-                            var rel = $"/uploads/vendors/{user.Id}/{licName}".Replace("\\", "/");
-                            user.VendorLicenseImagePath = rel;
+                            var upload = await _fileStorageService.UploadAsync(registerDto.LicenseImage, $"uploads/vendors/{user.Id}");
+                            user.VendorLicenseImagePath = upload.Url;
                             changed = true;
                         }
                     }
@@ -435,6 +432,22 @@ namespace ConstructionMarketplace.Services
                 user.CompanyName = updateProfileDto.CompanyName;
                 user.Bio = updateProfileDto.Bio;
                 user.DateOfBirth = updateProfileDto.DateOfBirth ?? user.DateOfBirth;
+                // Optional: update IBAN when provided
+                if (!string.IsNullOrWhiteSpace(updateProfileDto.Iban))
+                {
+                    var iban = updateProfileDto.Iban.Trim();
+                    // Basic SA IBAN check: SA + 22 chars (digits/letters) = 24 total
+                    if (System.Text.RegularExpressions.Regex.IsMatch(iban, @"^SA\\d{2}[A-Z0-9]{18}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    {
+                        user.Iban = iban.ToUpperInvariant();
+                    }
+                    else
+                    {
+                        // If invalid, keep previous value; alternatively, you could reject the update
+                        // Here we choose to reject by returning false
+                        return false;
+                    }
+                }
                 user.UpdatedAt = DateTime.UtcNow;
 
                 var result = await _userManager.UpdateAsync(user);

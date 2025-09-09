@@ -5,7 +5,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:5050'
 function getAuthToken(): string | null {
   try {
     if (typeof window === 'undefined') return null;
-    return localStorage.getItem('auth_token');
+    const ls = localStorage.getItem('auth_token');
+    if (ls) return ls;
+    // Fallback: read token from cookies if backend stores it there
+    const cookie = document.cookie
+      .split('; ')
+      .find((row) => row.startsWith('auth_token='));
+    if (cookie) return decodeURIComponent(cookie.split('=')[1] || '');
+    return null;
   } catch {
     return null;
   }

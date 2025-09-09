@@ -41,6 +41,11 @@ export async function getProducts(filter: SearchFilterDto = {}) {
   return api.get<PagedResultDto<ProductDto>>(`/api/Products${qs ? `?${qs}` : ''}`);
 }
 
+// Featured products for homepage
+export async function getFeaturedProducts() {
+  return api.get(`/api/Products/featured`);
+}
+
 export async function getProductById(id: number) {
   return api.get<ProductDto>(`/api/Products/${id}`);
 }

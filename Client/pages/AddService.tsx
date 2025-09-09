@@ -117,6 +117,8 @@ export default function AddService({ setCurrentPage, ...rest }: AddServiceProps)
           window.localStorage.setItem("user_services", JSON.stringify([item, ...list]));
         }
       }
+      // Inform vendor that the service is pending admin approval
+      try { alert(locale === 'ar' ? 'تم إرسال خدمتك وهي قيد المراجعة من الأدمن.' : 'Your service was submitted and is pending admin approval.'); } catch {}
       // Navigate to vendor services page after saving
       setCurrentPage && setCurrentPage("vendor-services");
     } catch {}

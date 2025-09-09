@@ -6,7 +6,8 @@ import { useTranslation } from "../../hooks/useTranslation";
 import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { getUsers } from "../../lib/authMock";
+import { listVendorServices } from "@/services/servicesCatalog";
+import { listOffersForService, updateOfferStatus, type OfferDto } from "@/services/offers";
 import Swal from "sweetalert2";
 
 interface Props extends Partial<RouteContext> {}
@@ -18,31 +19,34 @@ export default function VendorServiceApplicants({ setCurrentPage, ...context }: 
   const vendorId = (context as any)?.user?.id || null;
 
   const [services, setServices] = useState<any[]>([]);
-  const [requests, setRequests] = useState<any[]>([]);
+  const [requests, setRequests] = useState<Record<string, OfferDto[]>>({});
 
   useEffect(() => {
-    try {
-      if (typeof window === 'undefined') return;
-      const sRaw = window.localStorage.getItem('user_services');
-      const allServices = sRaw ? JSON.parse(sRaw) : [];
-      const rRaw = window.localStorage.getItem('technician_requests');
-      const allReqs = rRaw ? JSON.parse(rRaw) : [];
-      const filteredServices = Array.isArray(allServices)
-        ? (vendorId ? allServices.filter((s:any)=> String(s.userId) === String(vendorId)) : allServices)
-        : [];
-      const filteredReqs = Array.isArray(allReqs)
-        ? allReqs.filter((r:any)=> r?.targetType === 'service')
-        : [];
-      setServices(filteredServices);
-      setRequests(filteredReqs);
-    } catch {}
+    let cancelled = false;
+    (async () => {
+      try {
+        const { ok, data } = await listVendorServices({ vendorId: 'me' });
+        if (!ok || !Array.isArray(data)) { if (!cancelled) { setServices([]); setRequests({}); } return; }
+        if (cancelled) return;
+        setServices(data as any[]);
+        // Fetch offers for each service
+        const entries = await Promise.all(
+          (data as any[]).map(async (s:any) => {
+            try {
+              const r = await listOffersForService(Number(s.id));
+              return [String(s.id), (r.ok && Array.isArray(r.data) ? r.data as OfferDto[] : [])] as [string, OfferDto[]];
+            } catch { return [String(s.id), []] as [string, OfferDto[]]; }
+          })
+        );
+        if (!cancelled) setRequests(Object.fromEntries(entries));
+      } catch {
+        if (!cancelled) { setServices([]); setRequests({}); }
+      }
+    })();
+    return () => { cancelled = true; };
   }, [vendorId]);
 
-  const users = useMemo(()=>{
-    try { return getUsers(); } catch { return []; }
-  }, []);
-
-  const techName = (id: any) => users.find((u:any)=> String(u.id)===String(id))?.name || `#${id}`;
+  const techName = (id: any) => `#${id}`;
 
   const labelForServiceType = (id?: string) => {
     const map: any = {
@@ -57,32 +61,33 @@ export default function VendorServiceApplicants({ setCurrentPage, ...context }: 
     return map[id]?.[isAr ? 'ar' : 'en'] || id;
   };
 
-  // Group requests by serviceId but keep a flat list too
-  const requestsByService = useMemo(() => {
-    const map: Record<string, any[]> = {};
-    for (const r of requests) {
-      const key = String(r.serviceId);
-      if (!map[key]) map[key] = [];
-      map[key].push(r);
+  // Flatten my requests for checks
+  const myRequests = useMemo(() => {
+    const all: OfferDto[] = [];
+    for (const key of Object.keys(requests)) {
+      const list = requests[key] || [];
+      for (const r of list) all.push(r);
     }
-    return map;
+    return all;
   }, [requests]);
 
-  const myServiceIds = new Set(services.map((s:any)=> String(s.id)));
-  const myRequests = useMemo(()=> requests.filter((r:any)=> myServiceIds.has(String(r.serviceId))), [requests, services]);
-
-  const updateStatus = async (reqId: string, status: 'accepted' | 'rejected') => {
+  const updateStatus = async (reqId: number, status: 'accepted' | 'rejected') => {
     const confirmText = status === 'accepted' ? (isAr ? 'قبول هذا المتقدم؟' : 'Accept this applicant?') : (isAr ? 'رفض هذا المتقدم؟' : 'Reject this applicant?');
     const ok = await Swal.fire({ title: confirmText, icon: 'question', showCancelButton: true, confirmButtonText: isAr ? 'تأكيد' : 'Confirm', cancelButtonText: isAr ? 'إلغاء' : 'Cancel' });
     if (!ok.isConfirmed) return;
     try {
-      const raw = window.localStorage.getItem('technician_requests');
-      const list = raw ? JSON.parse(raw) : [];
-      const next = Array.isArray(list) ? list.map((x:any)=> x.id===reqId ? { ...x, status } : x) : [];
-      window.localStorage.setItem('technician_requests', JSON.stringify(next));
-      // Refresh in-memory state
-      setRequests(next.filter((r:any)=> r?.targetType==='service'));
-      Swal.fire({ icon: 'success', title: status==='accepted' ? (isAr ? 'تم القبول' : 'Accepted') : (isAr ? 'تم الرفض' : 'Rejected'), timer: 1200, showConfirmButton: false });
+      const res = await updateOfferStatus(Number(reqId), status);
+      if (res.ok) {
+        // Refresh the service offers containing this request
+        const affectedServiceId = res.data?.serviceId ?? myRequests.find(r=> r.id===Number(reqId))?.serviceId;
+        if (affectedServiceId) {
+          try {
+            const r = await listOffersForService(Number(affectedServiceId));
+            setRequests(prev => ({ ...prev, [String(affectedServiceId)]: (r.ok && Array.isArray(r.data) ? r.data as OfferDto[] : []) }));
+          } catch {}
+        }
+        Swal.fire({ icon: 'success', title: status==='accepted' ? (isAr ? 'تم القبول' : 'Accepted') : (isAr ? 'تم الرفض' : 'Rejected'), timer: 1200, showConfirmButton: false });
+      }
     } catch {}
   };
 
@@ -117,7 +122,7 @@ export default function VendorServiceApplicants({ setCurrentPage, ...context }: 
         ) : (
           <div className="space-y-6">
             {services.map((s:any) => {
-              const list = requestsByService[String(s.id)] || [];
+              const list = requests[String(s.id)] || [];
               if (list.length === 0) return null;
               return (
                 <Card key={s.id}>
@@ -131,7 +136,7 @@ export default function VendorServiceApplicants({ setCurrentPage, ...context }: 
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-2">
-                      {list.map((r:any) => (
+                      {list.map((r:OfferDto) => (
                         <div key={r.id} className="rounded border p-3 bg-muted/20">
                           <div className="flex items-center justify-between">
                             <div className="font-medium text-sm flex items-center gap-2">
@@ -151,7 +156,7 @@ export default function VendorServiceApplicants({ setCurrentPage, ...context }: 
                           )}
                           <div className="flex items-center justify-between mt-2">
                             <div className="text-[10px] text-muted-foreground">
-                              {isAr ? 'تاريخ' : 'Date'}: {new Date(r.createdAt).toLocaleString(isAr?'ar-EG':'en-US')}
+                              {isAr ? 'تاريخ' : 'Date'}: {r.createdAt ? new Date(r.createdAt).toLocaleString(isAr?'ar-EG':'en-US') : '-'}
                             </div>
                             <div className="flex gap-2">
                               {r.status !== 'accepted' && (

@@ -42,35 +42,10 @@ import {
 import Header from "../../components/Header";
 import { useTranslation } from "../../hooks/useTranslation";
 import { confirmDialog } from "../../utils/alerts";
+import { getMyProducts } from "@/services/products";
+import { listVendorOrders as apiListVendorOrders } from "@/services/orders";
 
-// statsCards moved inside component to use translations
-
-const recentOrders = [
-  {
-    id: "#12345",
-    customer: "محمد العلي",
-    product: "فلتر زيت محرك",
-    amount: "120 ر.س",
-    status: "pending",
-    date: "2024-01-15",
-  },
-  {
-    id: "#12346",
-    customer: "فاطمة أحمد",
-    product: "تيل فرامل سيراميك",
-    amount: "350 ر.س",
-    status: "shipped",
-    date: "2024-01-14",
-  },
-  {
-    id: "#12347",
-    customer: "علي محمود",
-    product: "بطارية سيارة",
-    amount: "480 ر.س",
-    status: "delivered",
-    date: "2024-01-13",
-  },
-];
+// All dashboard content is derived dynamically from backend
 
 // Removed low stock sample data and alert section
 
@@ -78,40 +53,9 @@ const recentOrders = [
 
 export default function VendorDashboard({ setCurrentPage, ...context }: Partial<RouteContext>) {
   const { t, locale } = useTranslation();
-  const statsCards = [
-    {
-      title: t("totalProducts"),
-      value: "156",
-      change: t("changeUpThisMonth"),
-      icon: Package,
-      color: "text-blue-600",
-      trend: "up",
-    },
-    {
-      title: t("newOrders"),
-      value: "23",
-      change: t("changeUpToday"),
-      icon: ShoppingCart,
-      color: "text-green-600",
-      trend: "up",
-    },
-    {
-      title: t("monthlySales"),
-      value: "45,230 ر.س",
-      change: t("changeSalesFromLastMonth"),
-      icon: DollarSign,
-      color: "text-purple-600",
-      trend: "up",
-    },
-    {
-      title: t("storeRating"),
-      value: "4.8",
-      change: t("changeRatingThisMonth"),
-      icon: Star,
-      color: "text-yellow-600",
-      trend: "up",
-    },
-  ];
+  const [loading, setLoading] = useState(true);
+  const [products, setProducts] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
 
   // وظائف التاجر (مترجمة)
   const vendorFunctions: Array<{
@@ -167,10 +111,10 @@ export default function VendorDashboard({ setCurrentPage, ...context }: Partial<
     },
   ];
 
-  // عرض المشاريع والخدمات من localStorage
-  const [userProjects, setUserProjects] = useState<any[]>([]);
-  const [userServices, setUserServices] = useState<any[]>([]);
-  const [vendorProposals, setVendorProposals] = useState<any[]>([]);
+  // Deprecated: remove localStorage-driven data to keep dashboard fully dynamic
+  const [userProjects] = useState<any[]>([]);
+  const [userServices] = useState<any[]>([]);
+  const [vendorProposals] = useState<any[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [editPrice, setEditPrice] = useState<string>("");
@@ -178,21 +122,21 @@ export default function VendorDashboard({ setCurrentPage, ...context }: Partial<
   const [editMessage, setEditMessage] = useState<string>("");
   const [editSaving, setEditSaving] = useState(false);
   useEffect(() => {
-    try {
-      if (typeof window === "undefined") return;
-      const pRaw = window.localStorage.getItem("user_projects");
-      const sRaw = window.localStorage.getItem("user_services");
-      const p = pRaw ? JSON.parse(pRaw) : [];
-      const s = sRaw ? JSON.parse(sRaw) : [];
-      if (Array.isArray(p)) setUserProjects(p);
-      if (Array.isArray(s)) setUserServices(s);
-      // Load vendor proposals and filter by current vendor
-      const vRaw = window.localStorage.getItem('vendor_proposals');
-      const allProps = vRaw ? JSON.parse(vRaw) : [];
-      const myId = (context as any)?.user?.id;
-      const mine = Array.isArray(allProps) ? allProps.filter((pr: any) => !myId || pr.vendorId === myId) : [];
-      setVendorProposals(mine);
-    } catch {}
+    let cancelled = false;
+    (async () => {
+      try {
+        // Load products (owned by vendor)
+        const rp = await getMyProducts();
+        if (!cancelled && rp.ok && Array.isArray(rp.data)) setProducts(rp.data as any[]);
+      } catch {}
+      try {
+        // Load vendor orders
+        const ro = await apiListVendorOrders({ vendorId: 'me' });
+        if (!cancelled && ro.ok && Array.isArray(ro.data)) setOrders(ro.data as any[]);
+      } catch {}
+      if (!cancelled) setLoading(false);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Helpers to derive constraints from target snapshot (project)
@@ -221,6 +165,10 @@ export default function VendorDashboard({ setCurrentPage, ...context }: Partial<
   }, [editing]);
 
   const currency = locale === "ar" ? "ر.س" : "SAR";
+  const totalProducts = products.length;
+  const newOrders = orders.filter((o:any)=> String(o.status).toLowerCase()==='pending').length;
+  const monthlySales = orders.reduce((sum:number,o:any)=> sum + Number(o.total||0), 0);
+  const storeRating: number = 0; // placeholder until ratings backend exists
   const labelForProductType = (id: string) => {
     const map: any = {
       door: { ar: "باب", en: "Door" },
@@ -452,29 +400,7 @@ export default function VendorDashboard({ setCurrentPage, ...context }: Partial<
                         >
                           <Pencil className="w-4 h-4 mr-1" /> {locale === 'ar' ? 'تعديل' : 'Edit'}
                         </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="bg-red-600 hover:bg-red-700 text-white border-0"
-                          onClick={async () => {
-                            const ok = await confirmDialog(
-                              locale === 'ar' ? 'هل تريد حذف هذا العرض؟' : 'Delete this proposal?',
-                              locale === 'ar' ? 'نعم' : 'Yes',
-                              locale === 'ar' ? 'إلغاء' : 'Cancel',
-                              locale === 'ar'
-                            );
-                            if (!ok) return;
-                            try {
-                              const raw = window.localStorage.getItem('vendor_proposals');
-                              const list = raw ? JSON.parse(raw) : [];
-                              const filtered = Array.isArray(list) ? list.filter((x:any)=> x.id !== pr.id) : [];
-                              window.localStorage.setItem('vendor_proposals', JSON.stringify(filtered));
-                              setVendorProposals((prev)=> prev.filter((x:any)=> x.id !== pr.id));
-                            } catch {}
-                          }}
-                        >
-                          <Trash2 className="w-4 h-4 mr-1" /> {locale === 'ar' ? 'حذف' : 'Delete'}
-                        </Button>
+                        {/* Proposals deletion removed in dynamic mode */}
                       </div>
                     </CardContent>
                   </Card>
@@ -487,31 +413,42 @@ export default function VendorDashboard({ setCurrentPage, ...context }: Partial<
 
         {/* Quick Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {statsCards.map((stat, index) => (
-            <Card key={index}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  {stat.title}
-                </CardTitle>
-                <stat.icon className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
-                <div
-                  className={`flex items-center text-xs ${
-                    stat.trend === "up" ? "text-green-600" : "text-red-600"
-                  }`}
-                >
-                  {stat.trend === "up" ? (
-                    <TrendingUp className="mr-1 h-3 w-3" />
-                  ) : (
-                    <TrendingDown className="mr-1 h-3 w-3" />
-                  )}
-                  {stat.change}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{t("totalProducts")}</CardTitle>
+              <Package className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{loading ? '—' : totalProducts}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{t("newOrders")}</CardTitle>
+              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{loading ? '—' : newOrders}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{t("monthlySales")}</CardTitle>
+              <DollarSign className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{loading ? '—' : `${monthlySales.toLocaleString(locale==='ar'?'ar-EG':'en-US')} ${currency}`}</div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{t("storeRating")}</CardTitle>
+              <Star className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{storeRating ? storeRating.toFixed(1) : '—'}</div>
+            </CardContent>
+          </Card>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
@@ -635,33 +572,22 @@ export default function VendorDashboard({ setCurrentPage, ...context }: Partial<
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {recentOrders.map((order) => (
-                    <div
-                      key={order.id}
-                      className="flex items-center justify-between p-4 border rounded-lg"
-                    >
+                  {(orders.slice(0,5)).map((order:any) => (
+                    <div key={order.id} className="flex items-center justify-between p-4 border rounded-lg">
                       <div className="flex items-center space-x-4 space-x-reverse">
                         <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
                           <ShoppingCart className="h-5 w-5 text-primary" />
                         </div>
                         <div>
-                          <p className="font-medium">{order.id}</p>
-                          <p className="text-sm text-muted-foreground">
-                            {order.customer}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {order.product}
-                          </p>
+                          <p className="font-medium">#{order.id}</p>
+                          <p className="text-sm text-muted-foreground">{order.customerName || '-'}</p>
+                          <p className="text-xs text-muted-foreground">{order.items?.[0]?.name || ''}</p>
                         </div>
                       </div>
                       <div className="text-left">
-                        <p className="font-medium">{order.amount}</p>
-                        <Badge variant={getStatusColor(order.status)}>
-                          {getStatusText(order.status)}
-                        </Badge>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {order.date}
-                        </p>
+                        <p className="font-medium">{currency} {Number(order.total||0).toLocaleString(locale==='ar'?'ar-EG':'en-US')}</p>
+                        <Badge variant={getStatusColor(String(order.status))}>{getStatusText(String(order.status))}</Badge>
+                        <p className="text-xs text-muted-foreground mt-1">{order.createdAt ? new Date(order.createdAt).toLocaleString(locale==='ar'?'ar-EG':'en-US') : ''}</p>
                       </div>
                     </div>
                   ))}
@@ -862,13 +788,6 @@ export default function VendorDashboard({ setCurrentPage, ...context }: Partial<
                 if (!Number.isFinite(vD) || vD < 1 || vD > (Number.isFinite(editMaxDays) ? Number(editMaxDays) : Infinity)) return;
                 try {
                   setEditSaving(true);
-                  const raw = window.localStorage.getItem('vendor_proposals');
-                  const list = raw ? JSON.parse(raw) : [];
-                  const updated = Array.isArray(list)
-                    ? list.map((x:any)=> x.id === editing.id ? { ...x, price: vP, days: vD, message: editMessage } : x)
-                    : [];
-                  window.localStorage.setItem('vendor_proposals', JSON.stringify(updated));
-                  setVendorProposals((prev)=> prev.map((x:any)=> x.id === editing.id ? { ...x, price: vP, days: vD, message: editMessage } : x));
                   setEditOpen(false);
                 } finally {
                   setEditSaving(false);

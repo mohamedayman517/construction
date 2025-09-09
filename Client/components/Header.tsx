@@ -8,6 +8,7 @@ import LanguageSwitcher from './LanguageSwitcher';
 import { useTranslation } from '../hooks/useTranslation';
 import type { RouteContext } from './Router';
 import { useEffect, useState } from 'react';
+import { logout as apiLogout } from '@/services/auth';
 
 interface HeaderProps extends Partial<RouteContext> {
   currentPage?: string;
@@ -300,7 +301,7 @@ export default function Header({ currentPage, setCurrentPage, cartItems, user, s
                         </Button>
                       )}
                       <button
-                        onClick={() => { setUser && setUser(null); go('home'); }}
+                        onClick={() => { try { apiLogout(); localStorage.removeItem('mock_current_user'); } catch {} setUser && setUser(null); go('home'); }}
                         className="text-foreground hover:text-primary transition-colors px-2 py-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800"
                       >
                         {locale === 'ar' ? 'تسجيل الخروج' : 'Logout'}
@@ -394,7 +395,7 @@ export default function Header({ currentPage, setCurrentPage, cartItems, user, s
             {/* Restricted (admin only): show limited options */}
             {isAdmin && (
               <>
-                <button onClick={() => { setUser && setUser(null); go('home'); setMobileOpen(false); }} className="py-3 text-left text-foreground hover:text-primary transition-colors">{locale === 'ar' ? 'تسجيل الخروج' : 'Logout'}</button>
+                <button onClick={() => { try { apiLogout(); localStorage.removeItem('mock_current_user'); } catch {} setUser && setUser(null); go('home'); setMobileOpen(false); }} className="py-3 text-left text-foreground hover:text-primary transition-colors">{locale === 'ar' ? 'تسجيل الخروج' : 'Logout'}</button>
               </>
             )}
             {user ? (
@@ -403,7 +404,7 @@ export default function Header({ currentPage, setCurrentPage, cartItems, user, s
                   <button onClick={() => { go('profile'); setMobileOpen(false); }} className="py-3 text-left text-foreground hover:text-primary transition-colors">{locale === 'ar' ? 'الملف الشخصي' : 'Profile'}</button>
                 )}
                 {!isRestricted && (
-                  <button onClick={() => { setUser && setUser(null); go('home'); setMobileOpen(false); }} className="py-3 text-left text-foreground hover:text-primary transition-colors">{locale === 'ar' ? 'تسجيل الخروج' : 'Logout'}</button>
+                  <button onClick={() => { try { apiLogout(); localStorage.removeItem('mock_current_user'); } catch {} setUser && setUser(null); go('home'); setMobileOpen(false); }} className="py-3 text-left text-foreground hover:text-primary transition-colors">{locale === 'ar' ? 'تسجيل الخروج' : 'Logout'}</button>
                 )}
               </>
             ) : (

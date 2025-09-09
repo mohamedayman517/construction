@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import Swal from "sweetalert2";
-import { listVendorServices } from "@/services/servicesCatalog";
+import { listPublicServices } from "@/services/servicesCatalog";
+import { createOffer, getTechnicianOffers } from "@/services/offers";
 
 type Props = Partial<RouteContext>;
 
@@ -23,6 +24,7 @@ export default function TechnicianServices({ setCurrentPage, ...context }: Props
   const safeSetCurrentPage = setCurrentPage ?? (() => {});
 
   const [services, setServices] = useState<any[]>([]);
+  const [myOffers, setMyOffers] = useState<any[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   // Proposal dialog state
@@ -33,13 +35,13 @@ export default function TechnicianServices({ setCurrentPage, ...context }: Props
   const [offerMessage, setOfferMessage] = useState<string>("");
   const [saving, setSaving] = useState(false);
 
-  // Load all vendor-posted services from backend
+  // Load all approved/public services from backend
   useEffect(() => {
     let cancelled = false;
     setHydrated(true);
     (async () => {
       try {
-        const { ok, data } = await listVendorServices({});
+        const { ok, data } = await listPublicServices();
         if (!cancelled && ok && Array.isArray(data)) setServices(data as any[]);
         else if (!cancelled) setServices([]);
       } catch { if (!cancelled) setServices([]); }
@@ -47,22 +49,29 @@ export default function TechnicianServices({ setCurrentPage, ...context }: Props
     return () => { cancelled = true; };
   }, []);
 
+  // Load my offers to know what I already submitted
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!technicianId) { setMyOffers([]); return; }
+        const { ok, data } = await getTechnicianOffers(String(technicianId));
+        if (!cancelled && ok && Array.isArray(data)) setMyOffers(data as any[]);
+        else if (!cancelled) setMyOffers([]);
+      } catch { if (!cancelled) setMyOffers([]); }
+    })();
+    return () => { cancelled = true; };
+  }, [technicianId]);
+
   // Build fast lookup for requests already submitted by this technician
   const submittedServices = useMemo(() => {
-    try {
-      if (typeof window === "undefined") return new Set<string>();
-      const raw = window.localStorage.getItem("technician_requests");
-      const list = raw ? JSON.parse(raw) : [];
-      if (!Array.isArray(list)) return new Set<string>();
-      return new Set<string>(
-        list
-          .filter((x: any) => (!!technicianId ? x.technicianId === technicianId : true) && x.targetType === "service")
-          .map((x: any) => String(x.serviceId))
-      );
-    } catch {
-      return new Set<string>();
-    }
-  }, [technicianId, hydrated]);
+    if (!Array.isArray(myOffers)) return new Set<string>();
+    return new Set<string>(
+      myOffers
+        .filter((o: any) => String(o.targetType).toLowerCase() === 'service' && o.serviceId != null)
+        .map((o: any) => String(o.serviceId))
+    );
+  }, [myOffers]);
 
   const labelForServiceType = (t?: string) => {
     switch ((t || "").toLowerCase()) {
@@ -282,55 +291,25 @@ export default function TechnicianServices({ setCurrentPage, ...context }: Props
                   });
                   return;
                 }
-                try {
-                  setSaving(true);
-                  const request = {
-                    id: `treq_${Date.now()}`,
-                    targetType: 'service' as const,
-                    serviceId: selectedService.id,
-                    price: priceNum,
-                    days: daysNum,
-                    message: offerMessage || '',
-                    technicianId,
-                    status: 'pending',
-                    createdAt: new Date().toISOString(),
-                  };
-                  const raw = window.localStorage.getItem('technician_requests');
-                  const list = raw ? JSON.parse(raw) : [];
-                  const exists = Array.isArray(list) && list.some((x:any)=> x.targetType==='service' && String(x.serviceId)===String(selectedService.id) && (!!technicianId ? x.technicianId===technicianId : true));
-                  if (!exists) list.push(request);
-                  window.localStorage.setItem('technician_requests', JSON.stringify(list));
-
-                  // Notify service owner (vendor)
+                (async () => {
                   try {
-                    const recipientId = selectedService.userId || selectedService.user?.id || null;
-                    const techName = (context as any)?.user?.name || (context as any)?.user?.username || (context as any)?.user?.email || (isAr ? 'فني' : 'Technician');
-                    const title = isAr ? 'طلب جديد على خدمتك' : 'New request on your service';
-                    const numLocale = isAr ? 'ar-EG' : 'en-US';
-                    const desc = isAr
-                      ? `${techName} قدّم طلبًا بقيمة ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale)} لمدة ${Number(offerDays || 0)} يوم`
-                      : `${techName} submitted a request: ${currency} ${Number(offerPrice || 0).toLocaleString(numLocale)} for ${Number(offerDays || 0)} days`;
-                    const nraw = window.localStorage.getItem('app_notifications');
-                    const nlist = nraw ? JSON.parse(nraw) : [];
-                    const notif = {
-                      id: `ntf_${Date.now()}`,
-                      type: 'service_request',
-                      recipientId,
-                      recipientRole: 'vendor',
-                      title,
-                      description: desc,
-                      createdAt: new Date().toISOString(),
-                      read: false,
-                    };
-                    const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                    window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                  } catch {}
-
-                  setRequestOpen(false);
-                  Swal.fire({ icon: 'success', title: isAr ? 'تم إرسال الطلب' : 'Request submitted', timer: 1800, showConfirmButton: false });
-                } finally {
-                  setSaving(false);
-                }
+                    setSaving(true);
+                    const res = await createOffer({ targetType: 'service', serviceId: Number(selectedService.id), price: priceNum, days: daysNum, message: offerMessage || '' });
+                    if (res.ok) {
+                      // refresh my offers to update UI state
+                      try {
+                        if (technicianId) {
+                          const { ok, data } = await getTechnicianOffers(String(technicianId));
+                          if (ok && Array.isArray(data)) setMyOffers(data as any[]);
+                        }
+                      } catch {}
+                      setRequestOpen(false);
+                      Swal.fire({ icon: 'success', title: isAr ? 'تم إرسال الطلب' : 'Request submitted', timer: 1800, showConfirmButton: false });
+                    }
+                  } finally {
+                    setSaving(false);
+                  }
+                })();
               }}
             >
               {saving ? (isAr ? 'جارٍ الحفظ...' : 'Saving...') : (isAr ? 'إرسال الطلب' : 'Send Request')}

@@ -9,7 +9,7 @@ import { useTranslation } from "../hooks/useTranslation";
 import type { RouteContext } from "../components/routerTypes";
 import { getServiceById, deleteService as apiDeleteService } from "@/services/servicesCatalog";
 import { Info, Package, Calendar, ClipboardList, Check, X } from "lucide-react";
-import { getUsers } from "../lib/authMock";
+import { listOffersForService, updateOfferStatus, type OfferDto } from "@/services/offers";
 
 interface ServiceDetailsProps extends Partial<RouteContext> {}
 
@@ -38,15 +38,8 @@ export default function ServiceDetails({ setCurrentPage, ...context }: ServiceDe
   const currency = locale === 'ar' ? 'ر.س' : 'SAR';
   const numLocale = locale === 'ar' ? 'ar-EG' : 'en-US';
   const [service, setService] = useState<Service | null>(null);
-  const [proposals, setProposals] = useState<any[]>([]);
-  const usersById = useMemo(() => {
-    try {
-      const arr = getUsers();
-      const map: Record<string, string> = {};
-      arr.forEach((u:any) => { map[u.id] = u.name || u.email || u.id; });
-      return map;
-    } catch { return {}; }
-  }, []);
+  const [proposals, setProposals] = useState<OfferDto[]>([]);
+  const usersById = useMemo(() => ({} as Record<string,string>), []);
 
   // Load selected service by id: backend first, then fallback to localStorage
   useEffect(() => {
@@ -74,12 +67,13 @@ export default function ServiceDetails({ setCurrentPage, ...context }: ServiceDe
             }
           }
         }
-        // Load technician requests (proposals) for this service (local only)
+        // Load technician offers (proposals) for this service from backend if we have a service id
         try {
-          const pRaw = window.localStorage.getItem('technician_requests');
-          const plist = pRaw ? JSON.parse(pRaw) : [];
-          const filtered = Array.isArray(plist) ? plist.filter((p:any)=> p.targetType === 'service' && String(p.serviceId) === String(id)) : [];
-          if (!cancelled) setProposals(filtered);
+          const sid = id ? Number(id) : (service as any)?.id ? Number((service as any).id) : null;
+          if (sid != null) {
+            const r = await listOffersForService(Number(sid));
+            if (!cancelled && r.ok && Array.isArray(r.data)) setProposals(r.data as OfferDto[]);
+          }
         } catch {}
       } catch {}
     })();
@@ -230,68 +224,22 @@ export default function ServiceDetails({ setCurrentPage, ...context }: ServiceDe
                         {pp.message && <div className="mt-1 text-xs bg-muted/20 rounded p-2">{pp.message}</div>}
                         {pp.status === 'pending' && (
                           <div className="mt-2 flex items-center gap-2">
-                            <Button size="sm" className="flex-1" onClick={() => {
+                            <Button size="sm" className="flex-1" onClick={async () => {
                               try {
-                                const raw = window.localStorage.getItem('technician_requests');
-                                const list = raw ? JSON.parse(raw) : [];
-                                const next = list.map((x:any)=> x.id===pp.id ? { ...x, status: 'accepted' } : x);
-                                window.localStorage.setItem('technician_requests', JSON.stringify(next));
-                                setProposals((prev)=> prev.map((x:any)=> x.id===pp.id ? { ...x, status: 'accepted' } : x));
-                                // Notify technician about acceptance
-                                try {
-                                  const nraw = window.localStorage.getItem('app_notifications');
-                                  const nlist = nraw ? JSON.parse(nraw) : [];
-                                  const numLocale = locale==='ar' ? 'ar-EG' : 'en-US';
-                                  const title = locale==='ar' ? 'تم قبول عرضك' : 'Your proposal was accepted';
-                                  const desc = locale==='ar'
-                                    ? `تم قبول عرضك بقيمة ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} لمدة ${Number(pp.days||0)} يوم`
-                                    : `Your offer of ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} for ${Number(pp.days||0)} days was accepted`;
-                                  const notif = {
-                                    id: `ntf_${Date.now()}`,
-                                    type: 'proposal-status',
-                                    recipientId: pp.technicianId,
-                                    recipientRole: 'technician',
-                                    title,
-                                    desc,
-                                    createdAt: new Date().toISOString(),
-                                    meta: { targetType: 'service', targetId: (service as any)?.id, proposalId: pp.id, status: 'accepted' }
-                                  };
-                                  const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                                  window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                                } catch {}
+                                const r = await updateOfferStatus(Number(pp.id), 'accepted');
+                                if (r.ok) {
+                                  setProposals(prev => prev.map(x => x.id===pp.id ? { ...x, status: 'accepted' } as any : x));
+                                }
                               } catch {}
                             }}>
                               <Check className="w-4 h-4 ml-1" /> {locale === 'ar' ? 'قبول' : 'Accept'}
                             </Button>
-                            <Button size="sm" variant="destructive" className="flex-1 bg-red-600 hover:bg-red-700 text-white border border-red-600" onClick={() => {
+                            <Button size="sm" variant="destructive" className="flex-1 bg-red-600 hover:bg-red-700 text-white border border-red-600" onClick={async () => {
                               try {
-                                const raw = window.localStorage.getItem('technician_requests');
-                                const list = raw ? JSON.parse(raw) : [];
-                                const next = list.map((x:any)=> x.id===pp.id ? { ...x, status: 'rejected' } : x);
-                                window.localStorage.setItem('technician_requests', JSON.stringify(next));
-                                setProposals((prev)=> prev.map((x:any)=> x.id===pp.id ? { ...x, status: 'rejected' } : x));
-                                // Notify technician about rejection
-                                try {
-                                  const nraw = window.localStorage.getItem('app_notifications');
-                                  const nlist = nraw ? JSON.parse(nraw) : [];
-                                  const numLocale = locale==='ar' ? 'ar-EG' : 'en-US';
-                                  const title = locale==='ar' ? 'تم رفض عرضك' : 'Your proposal was rejected';
-                                  const desc = locale==='ar'
-                                    ? `تم رفض عرضك بقيمة ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} لمدة ${Number(pp.days||0)} يوم`
-                                    : `Your offer of ${currency} ${Number(pp.price||0).toLocaleString(numLocale)} for ${Number(pp.days||0)} days was rejected`;
-                                  const notif = {
-                                    id: `ntf_${Date.now()}`,
-                                    type: 'proposal-status',
-                                    recipientId: pp.technicianId,
-                                    recipientRole: 'technician',
-                                    title,
-                                    desc,
-                                    createdAt: new Date().toISOString(),
-                                    meta: { targetType: 'service', targetId: (service as any)?.id, proposalId: pp.id, status: 'rejected' }
-                                  };
-                                  const combined = Array.isArray(nlist) ? [notif, ...nlist] : [notif];
-                                  window.localStorage.setItem('app_notifications', JSON.stringify(combined));
-                                } catch {}
+                                const r = await updateOfferStatus(Number(pp.id), 'rejected');
+                                if (r.ok) {
+                                  setProposals(prev => prev.map(x => x.id===pp.id ? { ...x, status: 'rejected' } as any : x));
+                                }
                               } catch {}
                             }}>
                               <X className="w-4 h-4 ml-1" /> {locale === 'ar' ? 'رفض' : 'Reject'}

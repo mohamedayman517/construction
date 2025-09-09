@@ -5,7 +5,7 @@ import { routes } from "./routes";
 import { getCart as apiGetCart, addItem as apiAddItem, updateItemQuantity as apiUpdateItemQuantity, removeItem as apiRemoveItem, clearCart as apiClearCart } from "@/services/cart";
 import Homepage from "../pages/Homepage";
 import { useTranslation } from "../hooks/useTranslation";
-import { getProfile } from "@/services/auth";
+import { getProfile, getToken } from "@/services/auth";
 
 export type UserRole = "customer" | "vendor" | "technician" | "admin";
 
@@ -196,10 +196,12 @@ export default function Router() {
     } catch {}
   }, [cartItems]);
 
-  // Load cart from backend when user is logged in
+  // Load cart from backend when user is logged in and we have a token
   useEffect(() => {
     (async () => {
       if (!user) return;
+      const token = getToken?.();
+      if (!token) return;
       try {
         const r = await apiGetCart();
         if (r.ok && r.data && Array.isArray(r.data.items)) {
@@ -339,10 +341,12 @@ export default function Router() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // If no user but we have a valid auth token, try to fetch profile from backend
+  // If we have a valid auth token, try to fetch profile from backend
   useEffect(() => {
     (async () => {
       if (!sessionChecked) return;
+      const token = getToken?.();
+      if (!token) return; // no JWT -> skip calling profile to avoid 401
       try {
         const r = await getProfile();
         if (r.ok && r.data) {

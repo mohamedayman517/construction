@@ -50,6 +50,20 @@ interface ProfileUser {
   firstName?: string;
   middleName?: string;
   lastName?: string;
+  // Extended fields from backend UserDto
+  phoneSecondary?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+  postalCode?: string;
+  buildingNumber?: string;
+  streetName?: string;
+  companyName?: string;
+  taxNumber?: string;
+  iban?: string;
+  registryStart?: string;
+  registryEnd?: string;
+  isVerified?: boolean;
 }
 
 interface UserProfileProps extends RouteContext {
@@ -130,6 +144,19 @@ export default function UserProfile({ user, setUser, setCurrentPage, wishlistIte
         firstName: parts[0] || '',
         middleName: parts.length > 2 ? parts.slice(1, -1).join(' ') : '',
         lastName: parts.length >= 2 ? parts[parts.length - 1] : '',
+        phoneSecondary: '',
+        address: '',
+        city: '',
+        country: '',
+        postalCode: '',
+        buildingNumber: '',
+        streetName: '',
+        companyName: '',
+        taxNumber: '',
+        iban: '',
+        registryStart: '',
+        registryEnd: '',
+        isVerified: undefined,
       } as ProfileUser;
     }
     return { id: '1', name: '', email: '', phone: '', birthdate: '', avatar: '', role: 'customer', technicianType: '' } as ProfileUser;
@@ -157,12 +184,25 @@ export default function UserProfile({ user, setUser, setCurrentPage, wishlistIte
             email: typeof data.email === 'string' ? data.email : (user as any)?.email,
             phone: typeof (data as any).phoneNumber === 'string' ? (data as any).phoneNumber : (typeof (data as any).phone === 'string' ? (data as any).phone : (user as any)?.phone),
             birthdate: typeof (data as any).birthdate === 'string' ? (data as any).birthdate : '',
-            avatar: '',
+            avatar: (data as any)?.profilePicture || '',
             role: uiRole,
             technicianType: (user as any)?.technicianType || '',
             firstName: first,
             middleName: mid,
             lastName: last,
+            phoneSecondary: (data as any)?.phoneSecondary || '',
+            address: (data as any)?.address || '',
+            city: (data as any)?.city || '',
+            country: (data as any)?.country || '',
+            postalCode: (data as any)?.postalCode || '',
+            buildingNumber: (data as any)?.buildingNumber || '',
+            streetName: (data as any)?.streetName || '',
+            companyName: (data as any)?.companyName || '',
+            taxNumber: (data as any)?.taxNumber || '',
+            iban: (data as any)?.iban || '',
+            registryStart: (data as any)?.registryStart || '',
+            registryEnd: (data as any)?.registryEnd || '',
+            isVerified: Boolean((data as any)?.isVerified),
           };
           setEditedUser(merged);
           // sync Router user minimal fields
@@ -606,22 +646,22 @@ export default function UserProfile({ user, setUser, setCurrentPage, wishlistIte
                   <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle>{locale === 'en' ? 'Personal Information' : 'المعلومات الشخصية'}</CardTitle>
                     {!isEditing ? (
-                      <Button variant="outline" onClick={() => setIsEditing(true)}>
-                        <Edit className="h-4 w-4 ml-2" />
-                        {locale === 'en' ? 'Edit' : 'تعديل'}
+                    <Button variant="outline" onClick={() => setIsEditing(true)}>
+                      <Edit className="h-4 w-4 ml-2" />
+                      {locale === 'en' ? 'Edit' : 'تعديل'}
+                    </Button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <Button onClick={handleSave}>
+                        <Save className="h-4 w-4 ml-2" />
+                        {locale === 'en' ? 'Save' : 'حفظ'}
                       </Button>
-                    ) : (
-                      <div className="flex gap-2">
-                        <Button onClick={handleSave}>
-                          <Save className="h-4 w-4 ml-2" />
-                          {locale === 'en' ? 'Save' : 'حفظ'}
-                        </Button>
-                        <Button variant="outline" onClick={handleCancel}>
-                          <X className="h-4 w-4 ml-2" />
-                          {locale === 'en' ? 'Cancel' : 'إلغاء'}
-                        </Button>
-                      </div>
-                    )}
+                      <Button variant="outline" onClick={handleCancel}>
+                        <X className="h-4 w-4 ml-2" />
+                        {locale === 'en' ? 'Cancel' : 'إلغاء'}
+                     </Button>
+                     </div>
+                   )}
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -655,63 +695,72 @@ export default function UserProfile({ user, setUser, setCurrentPage, wishlistIte
                         </div>
                       )}
                     </div>
-                  </CardContent>
-                </Card>
-              </TabsContent>
-              {/* Offers Tab (technician) */}
-              <TabsContent value="offers">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>{locale==='en' ? 'My Offers' : 'عروضي'}</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {isTechnician && techOffers.length === 0 ? (
-                      <div className="text-center text-muted-foreground py-8">
-                        {locale==='en' ? 'No offers yet.' : 'لا توجد عروض بعد.'}
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-                        {techOffers.map(o => {
-                          const svc = o.serviceId ? servicesLookup[String(o.serviceId)] : null;
-                          return (
-                            <div key={o.id} className="p-4 border rounded-lg">
-                              <div className="flex justify-between items-start gap-4">
-                                <div>
-                                  <h3 className="font-medium">
-                                    {svc ? (svc.type || (locale==='en'?'Service':'خدمة')) : (locale==='en'?'Service':'خدمة')} #{o.serviceId}
-                                  </h3>
-                                  <p className="text-sm text-muted-foreground">
-                                    {locale==='en' ? 'Price' : 'السعر'}: {o.price} {locale==='en'?'SAR':'ر.س'} • {locale==='en' ? 'Days' : 'أيام'}: {o.days}
-                                  </p>
-                                  {!!o.message && (
-                                    <p className="text-sm text-muted-foreground mt-1">{o.message}</p>
-                                  )}
-                                  <p className="text-xs text-muted-foreground mt-1">
-                                    {(o.createdAt || '').slice(0,10)} • {(o.status || (locale==='en'?'Pending':'قيد الانتظار'))}
-                                  </p>
-                                </div>
-                                <div className="flex gap-2">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => {
-                                      try {
-                                        localStorage.setItem('selected_technician_service_id', String(o.serviceId));
-                                        localStorage.setItem('editing_technician_offer_id', String(o.id));
-                                      } catch {}
-                                      setCurrentPage?.('technician-service-details');
-                                    }}
-                                  >
-                                    {locale==='en' ? 'Edit' : 'تعديل'}
-                                  </Button>
-                                  <Button variant="ghost" size="sm" className="text-red-600" onClick={() => deleteOffer(o.id)}>
-                                    {locale==='en' ? 'Delete' : 'حذف'}
-                                  </Button>
-                                </div>
-                              </div>
+                    {/* Vendor specific readout */}
+                    {editedUser.role === 'vendor' && (
+                      <div className="md:col-span-2 space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <Label>{locale==='en'?'Company Name':'اسم الشركة'}</Label>
+                            <Input value={editedUser.companyName || ''} disabled className="bg-muted" />
+                          </div>
+                          <div>
+                            <Label>{locale==='en'?'Tax Number':'الرقم الضريبي'}</Label>
+                            <Input value={editedUser.taxNumber || ''} disabled className="bg-muted" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <Label>{locale==='en'?'IBAN':'رقم الآيبان'}</Label>
+                            <Input value={editedUser.iban || ''} disabled className="bg-muted" />
+                          </div>
+                          <div>
+                            <Label>{locale==='en'?'Verification':'حالة الاعتماد'}</Label>
+                            <Input value={editedUser.isVerified ? (locale==='en'?'Approved':'معتمد') : (locale==='en'?'Pending approval':'قيد المراجعة')} disabled className="bg-muted" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                          <div>
+                            <Label>{locale==='en'?'Building No.':'رقم المبنى'}</Label>
+                            <Input value={editedUser.buildingNumber || ''} disabled className="bg-muted" />
+                          </div>
+                          <div>
+                            <Label>{locale==='en'?'Street':'الشارع'}</Label>
+                            <Input value={editedUser.streetName || ''} disabled className="bg-muted" />
+                          </div>
+                          <div>
+                            <Label>{locale==='en'?'City':'المدينة'}</Label>
+                            <Input value={editedUser.city || ''} disabled className="bg-muted" />
+                          </div>
+                          <div>
+                            <Label>{locale==='en'?'Postal Code':'الرمز البريدي'}</Label>
+                            <Input value={editedUser.postalCode || ''} disabled className="bg-muted" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <Label>{locale==='en'?'Phone (Secondary)':'الهاتف (إضافي)'}</Label>
+                            <Input value={editedUser.phoneSecondary || ''} disabled className="bg-muted" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <Label>{locale==='en'?'Registry Start':'بداية السجل الموحد'}</Label>
+                              <Input value={editedUser.registryStart || ''} disabled className="bg-muted" />
                             </div>
-                          );
-                        })}
+                            <div>
+                              <Label>{locale==='en'?'Registry End':'نهاية السجل الموحد'}</Label>
+                              <Input value={editedUser.registryEnd || ''} disabled className="bg-muted" />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {/* Customer basic address summary (optional) */}
+                    {editedUser.role === 'customer' && (
+                      <div className="md:col-span-2 space-y-4">
+                        <div>
+                          <Label>{locale==='en'?'Address':'العنوان'}</Label>
+                          <Textarea value={(editedUser.address || '')} onChange={()=>{}} disabled className="bg-muted" />
+                        </div>
                       </div>
                     )}
                   </CardContent>

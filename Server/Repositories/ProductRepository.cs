@@ -26,7 +26,7 @@ namespace ConstructionMarketplace.Repositories
                 .Include(p => p.Category)
                 .Include(p => p.Merchant)
                 .Include(p => p.Images.Where(i => i.IsPrimary))
-                .Where(p => p.CategoryId == categoryId && p.IsActive)
+                .Where(p => p.CategoryId == categoryId && p.IsActive && p.IsApproved)
                 .OrderBy(p => p.NameEn)
                 .ToListAsync();
         }
@@ -47,7 +47,7 @@ namespace ConstructionMarketplace.Repositories
                 .Include(p => p.Category)
                 .Include(p => p.Merchant)
                 .Include(p => p.Images.Where(i => i.IsPrimary))
-                .Where(p => p.IsFeatured && p.IsActive)
+                .Where(p => p.IsFeatured && p.IsActive && p.IsApproved)
                 .OrderByDescending(p => p.AverageRating)
                 .ThenByDescending(p => p.ViewCount)
                 .ToListAsync();
@@ -59,7 +59,7 @@ namespace ConstructionMarketplace.Repositories
                 .Include(p => p.Category)
                 .Include(p => p.Merchant)
                 .Include(p => p.Images.Where(i => i.IsPrimary))
-                .Where(p => p.IsAvailableForRent && p.IsActive && p.RentPricePerDay.HasValue)
+                .Where(p => p.IsAvailableForRent && p.IsActive && p.IsApproved && p.RentPricePerDay.HasValue)
                 .OrderBy(p => p.RentPricePerDay)
                 .ToListAsync();
         }
@@ -71,7 +71,7 @@ namespace ConstructionMarketplace.Repositories
                 .Include(p => p.Merchant)
                 .Include(p => p.Images)
                 .Include(p => p.Attributes)
-                .FirstOrDefaultAsync(p => p.Slug == slug && p.IsActive);
+                .FirstOrDefaultAsync(p => p.Slug == slug && p.IsActive && p.IsApproved);
         }
 
         public async Task<Product?> GetBySKUAsync(string sku)
@@ -88,7 +88,7 @@ namespace ConstructionMarketplace.Repositories
                 .Include(p => p.Category)
                 .Include(p => p.Merchant)
                 .Include(p => p.Images.Where(i => i.IsPrimary))
-                .Where(p => p.IsActive);
+                .Where(p => p.IsActive && p.IsApproved);
 
             if (!string.IsNullOrEmpty(searchTerm))
             {
@@ -117,7 +117,7 @@ namespace ConstructionMarketplace.Repositories
                 .Include(p => p.Category)
                 .Include(p => p.Merchant)
                 .Include(p => p.Images.Where(i => i.IsPrimary))
-                .Where(p => p.IsActive && p.AverageRating.HasValue)
+                .Where(p => p.IsActive && p.IsApproved && p.AverageRating.HasValue)
                 .OrderByDescending(p => p.AverageRating)
                 .ThenByDescending(p => p.ReviewCount)
                 .Take(count)
@@ -130,7 +130,7 @@ namespace ConstructionMarketplace.Repositories
                 .Include(p => p.Category)
                 .Include(p => p.Merchant)
                 .Include(p => p.Images.Where(i => i.IsPrimary))
-                .Where(p => p.IsActive)
+                .Where(p => p.IsActive && p.IsApproved)
                 .OrderByDescending(p => p.ViewCount)
                 .Take(count)
                 .ToListAsync();

@@ -182,10 +182,9 @@ export default function ProductDetails({
     (product as any)?.image ? [(product as any).image] : []
   );
   const discountPercentage =
-    product.originalPrice > product.price
+    product && Number(product.originalPrice) > Number(product.price)
       ? Math.round(
-          ((product.originalPrice - product.price) / product.originalPrice) *
-            100
+          ((Number(product.originalPrice) - Number(product.price)) / Number(product.originalPrice)) * 100
         )
       : 0;
 
@@ -205,7 +204,7 @@ export default function ProductDetails({
   const fallbackInstall = doorWindowIds.has(product?.id || '') || isDoorLike || isWindowLike;
   const showInstallOption = vendorInstallEnabled ? true : fallbackInstall;
   const INSTALL_FEE_PER_UNIT = vendorInstallEnabled ? vendorInstallFee : 50;
-  const priceWithAddon = product.price + (showInstallOption && installSelected ? INSTALL_FEE_PER_UNIT : 0);
+  const priceWithAddon = (product?.price || 0) + (showInstallOption && installSelected ? INSTALL_FEE_PER_UNIT : 0);
   const subtotal = priceWithAddon * quantity;
 
   const handleAddToCart = () => {

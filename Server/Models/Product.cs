@@ -77,6 +77,11 @@ namespace ConstructionMarketplace.Models
         // Product status
         public bool IsActive { get; set; } = true;
 
+        // Admin approval
+        public bool IsApproved { get; set; } = false;
+
+        public DateTime? ApprovedAt { get; set; }
+
         public bool IsFeatured { get; set; } = false;
 
         public bool IsAvailableForRent { get; set; } = false;

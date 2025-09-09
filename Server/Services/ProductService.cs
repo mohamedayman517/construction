@@ -37,7 +37,7 @@ namespace ConstructionMarketplace.Services
                          (!filter.MinPrice.HasValue || p.Price >= filter.MinPrice.Value) &&
                          (!filter.MaxPrice.HasValue || p.Price <= filter.MaxPrice.Value) &&
                          (!filter.IsAvailableForRent.HasValue || p.IsAvailableForRent == filter.IsAvailableForRent.Value) &&
-                         p.IsActive,
+                         p.IsActive && p.IsApproved,
                     p => p.CreatedAt,
                     !filter.SortDescending
                 );
@@ -165,7 +165,8 @@ namespace ConstructionMarketplace.Services
                     IsAvailableForRent = createProductDto.IsAvailableForRent,
                     RentPricePerDay = createProductDto.RentPricePerDay,
                     Slug = GenerateSlug(createProductDto.NameEn),
-                    CreatedAt = DateTime.UtcNow
+                    CreatedAt = DateTime.UtcNow,
+                    IsApproved = false
                 };
 
                 // Add attributes
@@ -292,6 +293,8 @@ namespace ConstructionMarketplace.Services
                 AllowCustomDimensions = product.AllowCustomDimensions,
                 IsAvailableForRent = product.IsAvailableForRent,
                 RentPricePerDay = product.RentPricePerDay,
+                IsApproved = product.IsApproved,
+                ApprovedAt = product.ApprovedAt,
                 AverageRating = product.AverageRating,
                 ReviewCount = product.ReviewCount,
                 Images = product.Images?.Select(i => new ProductImageDto
@@ -311,6 +314,43 @@ namespace ConstructionMarketplace.Services
                 }).ToList() ?? new List<ProductAttributeDto>(),
                 CreatedAt = product.CreatedAt
             };
+        }
+
+        public async Task<bool> ApproveProductAsync(int id)
+        {
+            try
+            {
+                var product = await _productRepository.GetByIdAsync(id);
+                if (product == null) return false;
+                product.IsApproved = true;
+                product.ApprovedAt = DateTime.UtcNow;
+                await _productRepository.UpdateAsync(product);
+                return await _productRepository.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error approving product: {ProductId}", id);
+                throw;
+            }
+        }
+
+        public async Task<bool> RejectProductAsync(int id, string reason)
+        {
+            try
+            {
+                var product = await _productRepository.GetByIdAsync(id);
+                if (product == null) return false;
+                product.IsApproved = false;
+                product.ApprovedAt = null;
+                // Optionally: store reason in future field
+                await _productRepository.UpdateAsync(product);
+                return await _productRepository.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error rejecting product: {ProductId}", id);
+                throw;
+            }
         }
 
         private string GenerateSlug(string name)
