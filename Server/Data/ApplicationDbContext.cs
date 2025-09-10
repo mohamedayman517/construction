@@ -37,6 +37,7 @@ namespace ConstructionMarketplace.Data
         public DbSet<Address> Addresses { get; set; } = null!;
         public DbSet<WishlistItem> WishlistItems { get; set; } = null!;
         public DbSet<Offer> Offers { get; set; } = null!;
+        public DbSet<AdminSettingEntry> AdminSettings { get; set; } = null!;
 
         protected override void OnModelCreating(ModelBuilder builder)
         {

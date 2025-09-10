@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using ConstructionMarketplace.Models;
 using ConstructionMarketplace.Repositories;
+using System.Text.Json.Serialization;
 
 namespace ConstructionMarketplace.Controllers
 {
@@ -90,6 +91,32 @@ namespace ConstructionMarketplace.Controllers
             }
 
             return Ok(new { success = true, items = pendingMerchants });
+        }
+
+        // Suspend a merchant account (disable login and mark inactive)
+        [HttpPost("merchants/{userId}/suspend")]
+        public async Task<IActionResult> SuspendMerchant(string userId)
+        {
+            try
+            {
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null)
+                    return NotFound(new { success = false, message = "User not found." });
+
+                var roles = await _userManager.GetRolesAsync(user);
+                if (!roles.Contains("Merchant"))
+                    return BadRequest(new { success = false, message = "User is not a merchant." });
+
+                user.IsActive = false;
+                await _userManager.UpdateAsync(user);
+
+                return Ok(new { success = true, message = "Merchant suspended." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error suspending merchant {UserId}", userId);
+                return StatusCode(500, new { success = false, message = "Failed to suspend merchant." });
+            }
         }
 
         // Approve a merchant and notify via email
@@ -205,5 +232,231 @@ namespace ConstructionMarketplace.Controllers
                 return StatusCode(500, new { success = false, message = "Failed to reject service." });
             }
         }
+
+        // List users with optional filtering by role and status
+        // GET: /api/Admin/users?role=Admin|Merchant|Technician|Customer&status=active|inactive|pending
+        [HttpGet("users")]
+        public async Task<IActionResult> GetUsers([FromQuery] string? role = null, [FromQuery] string? status = null)
+        {
+            try
+            {
+                var query = _userManager.Users.AsQueryable();
+
+                // Filter by status (basic mapping)
+                if (!string.IsNullOrWhiteSpace(status))
+                {
+                    var s = status.Trim().ToLowerInvariant();
+                    if (s == "active") query = query.Where(u => u.IsActive);
+                    else if (s == "inactive" || s == "suspended" || s == "banned") query = query.Where(u => !u.IsActive);
+                    else if (s == "pending") query = query.Where(u => !u.IsVerified);
+                }
+
+                var list = await query.ToListAsync();
+                var results = new List<object>();
+                foreach (var u in list)
+                {
+                    var roles = await _userManager.GetRolesAsync(u);
+                    if (!string.IsNullOrWhiteSpace(role))
+                    {
+                        // Normalize role names
+                        var r = role.Trim();
+                        if (!roles.Contains(r, StringComparer.OrdinalIgnoreCase))
+                            continue;
+                    }
+                    results.Add(new
+                    {
+                        id = u.Id,
+                        name = $"{u.FirstName} {(string.IsNullOrWhiteSpace(u.MiddleName) ? string.Empty : u.MiddleName + " ")}{u.LastName}".Trim(),
+                        email = u.Email,
+                        phoneNumber = u.PhoneNumber,
+                        roles,
+                        isActive = u.IsActive,
+                        isVerified = u.IsVerified,
+                        createdAt = u.CreatedAt,
+                        companyName = u.CompanyName,
+                        city = u.City,
+                        country = u.Country,
+                    });
+                }
+
+                return Ok(new { success = true, items = results });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error listing users by admin");
+                return StatusCode(500, new { success = false, message = "Failed to list users." });
+            }
+        }
+
+        // Update user status (activate/suspend). For now toggle IsActive
+        [HttpPost("users/{userId}/status")]
+        public async Task<IActionResult> UpdateUserStatus(string userId, [FromBody] UpdateUserStatusDto payload)
+        {
+            try
+            {
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null)
+                    return NotFound(new { success = false, message = "User not found." });
+
+                var desired = (payload?.Status ?? string.Empty).Trim().ToLowerInvariant();
+                if (desired == "active") user.IsActive = true;
+                else if (desired == "suspended" || desired == "banned" || desired == "inactive") user.IsActive = false;
+                else if (desired == "pending") user.IsVerified = false; // best-effort mapping
+                else return BadRequest(new { success = false, message = "Unknown status." });
+
+                await _userManager.UpdateAsync(user);
+                return Ok(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating user status {UserId}", userId);
+                return StatusCode(500, new { success = false, message = "Failed to update user status." });
+            }
+        }
+
+        // Create a new user with a role
+        [HttpPost("users")]
+        public async Task<IActionResult> CreateUser([FromBody] AdminCreateUserDto dto)
+        {
+            try
+            {
+                if (dto == null || string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
+                    return BadRequest(new { success = false, message = "Email and Password are required." });
+
+                var existing = await _userManager.FindByEmailAsync(dto.Email);
+                if (existing != null)
+                    return BadRequest(new { success = false, message = "Email already exists." });
+
+                var user = new ApplicationUser
+                {
+                    UserName = dto.Email,
+                    Email = dto.Email,
+                    FirstName = dto.FirstName ?? "",
+                    LastName = dto.LastName ?? "",
+                    PhoneNumber = dto.PhoneNumber,
+                    CompanyName = dto.CompanyName,
+                    City = dto.City,
+                    Country = dto.Country,
+                    IsActive = true,
+                    IsVerified = string.Equals(dto.Role, "Merchant", StringComparison.OrdinalIgnoreCase) ? false : true,
+                };
+
+                var result = await _userManager.CreateAsync(user, dto.Password);
+                if (!result.Succeeded)
+                {
+                    return BadRequest(new { success = false, message = string.Join("; ", result.Errors.Select(e => e.Description)) });
+                }
+
+                if (!string.IsNullOrWhiteSpace(dto.Role))
+                {
+                    await _userManager.AddToRoleAsync(user, dto.Role);
+                }
+
+                return Ok(new { success = true, id = user.Id });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating user by admin");
+                return StatusCode(500, new { success = false, message = "Failed to create user." });
+            }
+        }
+
+        // Update user basic fields
+        [HttpPut("users/{userId}")]
+        public async Task<IActionResult> UpdateUser(string userId, [FromBody] AdminUpdateUserDto dto)
+        {
+            try
+            {
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null)
+                    return NotFound(new { success = false, message = "User not found." });
+
+                if (!string.IsNullOrWhiteSpace(dto.FirstName)) user.FirstName = dto.FirstName!;
+                if (!string.IsNullOrWhiteSpace(dto.MiddleName)) user.MiddleName = dto.MiddleName!;
+                if (!string.IsNullOrWhiteSpace(dto.LastName)) user.LastName = dto.LastName!;
+                if (!string.IsNullOrWhiteSpace(dto.PhoneNumber)) user.PhoneNumber = dto.PhoneNumber!;
+                if (!string.IsNullOrWhiteSpace(dto.CompanyName)) user.CompanyName = dto.CompanyName!;
+                if (!string.IsNullOrWhiteSpace(dto.City)) user.City = dto.City!;
+                if (!string.IsNullOrWhiteSpace(dto.Country)) user.Country = dto.Country!;
+
+                var result = await _userManager.UpdateAsync(user);
+                if (!result.Succeeded)
+                    return BadRequest(new { success = false, message = string.Join("; ", result.Errors.Select(e => e.Description)) });
+
+                // Optionally update roles
+                if (!string.IsNullOrWhiteSpace(dto.Role))
+                {
+                    var currentRoles = await _userManager.GetRolesAsync(user);
+                    if (!currentRoles.Contains(dto.Role))
+                    {
+                        await _userManager.RemoveFromRolesAsync(user, currentRoles);
+                        await _userManager.AddToRoleAsync(user, dto.Role);
+                    }
+                }
+
+                return Ok(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating user by admin {UserId}", userId);
+                return StatusCode(500, new { success = false, message = "Failed to update user." });
+            }
+        }
+
+        // Delete user
+        [HttpDelete("users/{userId}")]
+        public async Task<IActionResult> DeleteUser(string userId)
+        {
+            try
+            {
+                var user = await _userManager.FindByIdAsync(userId);
+                if (user == null)
+                    return NotFound(new { success = false, message = "User not found." });
+
+                var result = await _userManager.DeleteAsync(user);
+                if (!result.Succeeded)
+                    return BadRequest(new { success = false, message = string.Join("; ", result.Errors.Select(e => e.Description)) });
+
+                return Ok(new { success = true });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting user by admin {UserId}", userId);
+                return StatusCode(500, new { success = false, message = "Failed to delete user." });
+            }
+        }
+    }
+
+    public class UpdateUserStatusDto
+    {
+        [JsonPropertyName("status")] public string Status { get; set; } = string.Empty;
+    }
+
+    public class AdminCreateUserDto
+    {
+        public string Email { get; set; } = string.Empty;
+        public string Password { get; set; } = string.Empty;
+        public string? FirstName { get; set; }
+        public string? MiddleName { get; set; }
+        public string? LastName { get; set; }
+        public string? PhoneNumber { get; set; }
+        public string? CompanyName { get; set; }
+        public string? City { get; set; }
+        public string? Country { get; set; }
+        // Role names: Admin | Merchant | Technician | Customer
+        public string? Role { get; set; }
+    }
+
+    public class AdminUpdateUserDto
+    {
+        public string? FirstName { get; set; }
+        public string? MiddleName { get; set; }
+        public string? LastName { get; set; }
+        public string? PhoneNumber { get; set; }
+        public string? CompanyName { get; set; }
+        public string? City { get; set; }
+        public string? Country { get; set; }
+        // Optional role update
+        public string? Role { get; set; }
     }
 }
