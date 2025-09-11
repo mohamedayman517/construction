@@ -94,6 +94,10 @@ namespace ConstructionMarketplace.DTOs
 
         public DateTime? DateOfBirth { get; set; }
 
+        // Technician specific
+        [MaxLength(50)]
+        public string? Profession { get; set; }
+
         // Optional uploads for vendor (files)
         public IFormFile? DocumentFile { get; set; }
         public IFormFile? ImageFile { get; set; }
@@ -152,6 +156,7 @@ namespace ConstructionMarketplace.DTOs
         public string? ProfilePicture { get; set; }
         public string? VendorDocumentPath { get; set; }
         public string? VendorLicenseImagePath { get; set; }
+        public string? Profession { get; set; }
     }
 
     public class ChangePasswordDto

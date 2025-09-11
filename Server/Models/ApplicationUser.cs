@@ -63,6 +63,10 @@ namespace ConstructionMarketplace.Models
         [MaxLength(50)]
         public string? TaxNumber { get; set; }
 
+        // Technician profession
+        [MaxLength(50)]
+        public string? Profession { get; set; }
+
         [MaxLength(100)]
         public string? LicenseNumber { get; set; }
 

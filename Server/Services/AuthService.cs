@@ -157,6 +157,11 @@ namespace ConstructionMarketplace.Services
                     RegistryStart = registerDto.RegistryStart,
                     RegistryEnd = registerDto.RegistryEnd,
                 };
+                // Technician profession
+                if (!string.IsNullOrWhiteSpace(registerDto.Profession))
+                {
+                    user.Profession = registerDto.Profession;
+                }
 
                 var result = await _userManager.CreateAsync(user, registerDto.Password);
                 if (!result.Succeeded)
@@ -227,9 +232,9 @@ namespace ConstructionMarketplace.Services
                     _logger.LogError(fileEx, "Error saving vendor files/urls for user {UserId}", user.Id);
                 }
 
-                // Assign role
+                // Assign role (support Customer, Merchant, Technician)
                 if (!string.IsNullOrEmpty(registerDto.Role) && 
-                    (registerDto.Role == "Customer" || registerDto.Role == "Merchant" || registerDto.Role == "Worker"))
+                    (registerDto.Role == "Customer" || registerDto.Role == "Merchant" || registerDto.Role == "Technician"))
                 {
                     await _userManager.AddToRoleAsync(user, registerDto.Role);
                 }
@@ -626,6 +631,7 @@ namespace ConstructionMarketplace.Services
                 ProfilePicture = user.ProfilePicture,
                 VendorDocumentPath = user.VendorDocumentPath,
                 VendorLicenseImagePath = user.VendorLicenseImagePath,
+                Profession = user.Profession,
             };
         }
     }
